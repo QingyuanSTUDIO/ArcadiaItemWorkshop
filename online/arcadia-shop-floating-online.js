@@ -132,6 +132,20 @@
               </div>
             </details>
           </div>
+          <div class="th-arcadia-network-panel" hidden>
+            <details class="th-arcadia-settings-module" open>
+              <summary>联网与创意工坊</summary>
+              <div class="th-arcadia-settings-module-body">
+                <label class="th-arcadia-editor-field">服务器地址<input class="th-arcadia-network-api" type="url" placeholder="http://154.36.164.139:8787"></label>
+                <label class="th-arcadia-editor-field">账号<input class="th-arcadia-network-user" type="text"></label>
+                <label class="th-arcadia-editor-field">密码<input class="th-arcadia-network-pass" type="password"></label>
+                <div class="th-arcadia-network-auth-row"><button class="th-arcadia-network-login" type="button">登录</button><button class="th-arcadia-network-register" type="button">注册并登录</button><button class="th-arcadia-network-logout" type="button">退出登录</button></div>
+                <div class="th-arcadia-network-user-state">未登录</div>
+                <div class="th-arcadia-network-actions" hidden><button class="th-arcadia-network-upload" type="button">上传当前世界书</button><button class="th-arcadia-network-list" type="button">读取创意工坊</button></div>
+                <div class="th-arcadia-network-items"></div>
+              </div>
+            </details>
+          </div>
         </article>
       </div>
     </section>
@@ -250,6 +264,11 @@
     #${ROOT_ID} .th-arcadia-settings input::placeholder,
     #${ROOT_ID} .th-arcadia-settings textarea::placeholder { color: #aaa; opacity: 1; }
     #${ROOT_ID} .th-arcadia-settings-hint { font-size: 12px; opacity: .65; line-height: 1.4; }
+    #${ROOT_ID} .th-arcadia-network-panel { position: absolute; top: 48px; right: 0; bottom: 0; left: 0; z-index: 5; overflow: auto; padding: 8px 10px; background: var(--SmartThemeBlurTintColor, #222); }
+    #${ROOT_ID} .th-arcadia-network-auth-row, #${ROOT_ID} .th-arcadia-network-actions { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
+    #${ROOT_ID} .th-arcadia-network-auth-row button, #${ROOT_ID} .th-arcadia-network-actions button { border: 0; border-radius: 4px; padding: 7px 9px; background: #e89424; color: #fff; cursor: pointer; }
+    #${ROOT_ID} .th-arcadia-network-items { display: grid; gap: 5px; margin-top: 8px; }
+    #${ROOT_ID} .th-arcadia-network-item { border: 1px solid #ffffff2a; border-radius: 4px; padding: 7px 9px; background: #111; color: #fff; cursor: pointer; text-align: left; }
     #${ROOT_ID} .th-arcadia-model-row { display: flex; gap: 6px; margin-bottom: 9px; }
     #${ROOT_ID} .th-arcadia-model-row select { min-width: 0; flex: 1; }
     #${ROOT_ID} .th-arcadia-model-row button, #${ROOT_ID} .th-arcadia-settings-save,
@@ -325,6 +344,17 @@
   const aiTopP = root.querySelector('.th-arcadia-ai-top-p');
   const modelButton = root.querySelector('.th-arcadia-models');
   const networkButton = root.querySelector('.th-arcadia-network');
+  const networkPanel = root.querySelector('.th-arcadia-network-panel');
+  const networkApi = root.querySelector('.th-arcadia-network-api');
+  const networkUser = root.querySelector('.th-arcadia-network-user');
+  const networkPass = root.querySelector('.th-arcadia-network-pass');
+  const networkState = root.querySelector('.th-arcadia-network-user-state');
+  const networkActions = root.querySelector('.th-arcadia-network-actions');
+  const networkItems = root.querySelector('.th-arcadia-network-items');
+  let networkSession = null;
+  try { networkSession = JSON.parse(localStorage.getItem('th-arcadia-network-session') || 'null'); } catch (_) {}
+  networkApi.value = localStorage.getItem('th-arcadia-workshop-api') || '';
+  networkUser.value = networkSession?.username || '';
   const settingsSave = root.querySelector('.th-arcadia-settings-save');
   const promptSave = root.querySelector('.th-arcadia-prompt-save');
   const uiFontSize = root.querySelector('.th-arcadia-ui-font-size');
@@ -606,6 +636,59 @@
     }
   }
 
+  function showNetwork(show) {
+    networkPanel.hidden = !show;
+    settingsPanel.hidden = true;
+    settingsBackHeader.hidden = !show;
+    content.hidden = show || editMode || !selectedEntry;
+    editor.hidden = show || !editMode || !selectedEntry;
+    empty.hidden = show || !!selectedEntry;
+    if (show) updateNetworkState();
+  }
+  function updateNetworkState() {
+    const loggedIn = Boolean(networkSession?.token);
+    networkState.textContent = loggedIn ? `已登录：${networkSession.username}（${networkSession.role === 'admin' ? '管理员' : '用户'}）` : '未登录';
+    networkActions.hidden = !loggedIn;
+    networkPass.value = '';
+  }
+  function networkHeaders() { return networkSession?.token ? { Authorization: `Bearer ${networkSession.token}` } : {}; }
+  async function networkAuth(register) {
+    const apiBase = networkApi.value.trim().replace(/\/$/, '');
+    const username = networkUser.value.trim(); const password = networkPass.value;
+    if (!apiBase || !username || !password) { setStatus('请填写服务器地址、账号和密码'); return; }
+    try {
+      if (register) {
+        const r = await fetch(`${apiBase}/api/auth/register`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password }) });
+        const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error || '注册失败');
+      }
+      const r = await fetch(`${apiBase}/api/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password }) });
+      const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error || '登录失败');
+      networkSession = { token: d.token, username: d.user.username, role: d.user.role, api: apiBase };
+      localStorage.setItem('th-arcadia-workshop-api', apiBase); localStorage.setItem('th-arcadia-network-session', JSON.stringify(networkSession));
+      updateNetworkState(); setStatus('联网登录成功');
+    } catch (error) { setStatus(`联网失败：${error.message}`); }
+  }
+  async function networkUpload() {
+    if (!entries.length || !networkSession?.token) { setStatus('请先登录并确保已有世界书条目'); return; }
+    try {
+      let success = 0;
+      for (const entry of entries) {
+        const response = await fetch(`${networkSession.api}/api/worldbook/workshop`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...networkHeaders() }, body: JSON.stringify({ id: `tavern-${currentWorldBookName}-${entry.uid}`, worldbookName: currentWorldBookName, uid: String(entry.uid), name: entry.name || '', content: entry.content || '', strategy: entry.strategy || {}, position: entry.position || {}, enabled: entry.enabled !== false }) });
+        if (!response.ok) { const d = await response.json().catch(() => ({})); throw new Error(d.error || '上传失败'); } success += 1;
+      }
+      setStatus(`已上传 ${success} 个条目到创意工坊`);
+    } catch (error) { setStatus(`上传失败：${error.message}`); }
+  }
+  async function networkLoadWorkshop() {
+    if (!networkSession?.token) return;
+    try {
+      const r = await fetch(`${networkSession.api}/api/worldbook/workshop`, { headers: networkHeaders() }); const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error || '读取失败');
+      networkItems.innerHTML = d.items?.length ? d.items.map((item, index) => `<button type="button" class="th-arcadia-network-item" data-index="${index}">${item.name || '未命名条目'}</button>`).join('') : '<div class="th-arcadia-settings-hint">创意工坊暂无条目</div>';
+      networkItems.querySelectorAll('.th-arcadia-network-item').forEach(button => button.addEventListener('click', async () => { const item = d.items[Number(button.dataset.index)]; if (!currentWorldBookName || !parentWindow.TavernHelper?.createWorldbookEntries) return setStatus('当前环境不支持写入世界书'); await parentWindow.TavernHelper.createWorldbookEntries(currentWorldBookName, [{ name: item.name, content: item.content, strategy: item.strategy || { type: 'selective', keys: [] }, position: item.position || { type: 'after_character_definition', order: 100 }, enabled: item.enabled !== false }]); await loadEntries(); setStatus(`已下载：${item.name}`); }));
+      setStatus(`已读取 ${d.items?.length || 0} 个创意工坊条目`);
+    } catch (error) { setStatus(`读取失败：${error.message}`); }
+  }
+
   function openPanel() {
     panel.hidden = !panel.hidden;
     if (!panel.hidden) loadEntries();
@@ -732,6 +815,7 @@
 
   function showSettings(show) {
     settingsPanel.hidden = !show;
+    networkPanel.hidden = true;
     settingsBackHeader.hidden = !show;
     if (show) settingsPanel.querySelectorAll('.th-arcadia-settings-module').forEach(module => { module.open = false; });
     content.hidden = show || editMode || !selectedEntry;
@@ -868,7 +952,12 @@
   uiModeMobile.addEventListener('click', () => { uiSettings.mode = 'mobile'; applyUiSettings(); });
   aiSource.addEventListener('change', updateAiSourceFields);
   modelButton.addEventListener('click', fetchModels);
-  networkButton.addEventListener('click', networkWorkshop);
+  networkButton.addEventListener('click', () => showNetwork(true));
+  root.querySelector('.th-arcadia-network-login').addEventListener('click', () => networkAuth(false));
+  root.querySelector('.th-arcadia-network-register').addEventListener('click', () => networkAuth(true));
+  root.querySelector('.th-arcadia-network-logout').addEventListener('click', () => { networkSession = null; localStorage.removeItem('th-arcadia-network-session'); updateNetworkState(); setStatus('已退出联网账号'); });
+  root.querySelector('.th-arcadia-network-upload').addEventListener('click', networkUpload);
+  root.querySelector('.th-arcadia-network-list').addEventListener('click', networkLoadWorkshop);
   aiWriteButton.addEventListener('click', aiWrite);
   root.querySelector('.th-arcadia-mode-run').addEventListener('click', () => setEditMode(false));
   root.querySelector('.th-arcadia-mode-edit').addEventListener('click', () => setEditMode(true));
