@@ -124,7 +124,7 @@ export function createRepository(db, reportLimit = 5) {
     },
     listWorldbookEntries({ module, worldbookName = '' }) {
       // 不依赖 SQLite JSON1 扩展；宝塔环境中的 SQLite 构建可能未启用该扩展。
-      return db.prepare('SELECT * FROM worldbook_entries WHERE module = ? AND (? = "" OR worldbook_name = ?) ORDER BY name').all(module, worldbookName, worldbookName)
+      return db.prepare("SELECT * FROM worldbook_entries WHERE module = ? AND (? = '' OR worldbook_name = ?) ORDER BY name").all(module, worldbookName, worldbookName)
         .map(entryRow)
         .sort((a, b) => (Number(a.position?.order) || 0) - (Number(b.position?.order) || 0) || a.name.localeCompare(b.name, 'zh-CN'));
     },
