@@ -132,6 +132,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'OPTIONS') return send(req, res, 204, null);
     if (req.method === 'GET' && url.pathname === '/admin') return sendFile(res, path.join(ROOT, 'admin', 'index.html'), 'text/html; charset=utf-8');
     if (req.method === 'GET' && url.pathname === '/admin/users') return sendFile(res, path.join(ROOT, 'admin', 'users.html'), 'text/html; charset=utf-8');
+    if (req.method === 'GET' && url.pathname === '/admin/content') return sendFile(res, path.join(ROOT, 'admin', 'content.html'), 'text/html; charset=utf-8');
     if (req.method === 'POST' && url.pathname === '/api/admin/login') {
       const body = await readBody(req);
       const username = typeof body.username === 'string' ? body.username.trim() : '';
@@ -168,6 +169,18 @@ const server = http.createServer(async (req, res) => {
         return send(req, res, 200, { total: repository.adminCount(filter), items: repository.adminList(filter) });
       }
       if (req.method === 'GET' && url.pathname === '/api/admin/users') return send(req, res, 200, { users: repository.listUsers() });
+      if (req.method === 'GET' && url.pathname === '/api/admin/worldbook') {
+        const module = url.searchParams.get('module') === 'workshop' ? 'workshop' : 'worldbook';
+        return send(req, res, 200, { items: repository.listWorldbookEntries({ module, worldbookName: url.searchParams.get('worldbook') || '' }) });
+      }
+      if (req.method === 'POST' && url.pathname === '/api/admin/worldbook') {
+        const body = await readBody(req); const module = body.module === 'workshop' ? 'workshop' : 'worldbook'; const now = new Date().toISOString();
+        const item = repository.upsertWorldbookEntry({ id: body.id || crypto.randomUUID(), module, worldbookName: String(body.worldbookName || ''), uid: String(body.uid || crypto.randomUUID()), name: String(body.name || '').slice(0, 200), content: String(body.content || '').slice(0, 20000), strategyJson: JSON.stringify(body.strategy || {}), positionJson: JSON.stringify(body.position || {}), enabled: body.enabled === false ? 0 : 1, authorId: body.authorId || null, createdAt: body.createdAt || now, updatedAt: now });
+        return send(req, res, 200, { item });
+      }
+      if (req.method === 'DELETE' && parts.length === 4 && parts[0] === 'api' && parts[1] === 'admin' && parts[2] === 'worldbook') {
+        return send(req, res, 200, { ok: repository.deleteWorldbookEntry(parts[3]) });
+      }
       if (req.method === 'POST' && parts.length === 5 && parts[0] === 'api' && parts[1] === 'admin' && parts[2] === 'users' && parts[4] === 'role') {
         const body = await readBody(req); if (!['user', 'admin'].includes(body.role)) throw new ValidationError('role 不合法');
         const user = repository.setUserRole(parts[3], body.role); return user ? send(req, res, 200, { user }) : send(req, res, 404, { error: '用户不存在' });
