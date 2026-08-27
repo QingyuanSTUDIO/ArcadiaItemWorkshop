@@ -160,7 +160,7 @@
                   <input class="th-arcadia-workshop-search" type="search" placeholder="搜索条目名或上传者">
                 </div>
                 <div class="th-arcadia-network-actions" hidden><button class="th-arcadia-network-list" type="button">获取创意工坊</button><button class="th-arcadia-workshop-collapse-all" type="button">折叠全部</button></div>
-                <div class="th-arcadia-network-items"></div>
+                <div class="th-arcadia-network-items"></div><div class="th-arcadia-workshop-pager"></div>
               </div>
             </details>
             <details class="th-arcadia-settings-module th-arcadia-mainline-module">
@@ -172,7 +172,7 @@
                   <input class="th-arcadia-mainline-search" type="search" placeholder="搜索条目名或上传者">
                 </div>
                 <div class="th-arcadia-mainline-actions"><button class="th-arcadia-mainline-refresh" type="button">读取世界书本体</button><button class="th-arcadia-mainline-update" type="button" hidden>更新世界书本体</button><button class="th-arcadia-mainline-collapse-all" type="button">折叠全部</button></div>
-                <div class="th-arcadia-mainline-items"></div>
+                <div class="th-arcadia-mainline-items"></div><div class="th-arcadia-mainline-pager"></div>
               </div>
             </details>
           </div>
@@ -301,6 +301,10 @@
     #${ROOT_ID} .th-arcadia-mainline-actions button:hover { filter: brightness(1.12); }
     #${ROOT_ID} .th-arcadia-network-auth-row button, #${ROOT_ID} .th-arcadia-network-actions button { border: 0; border-radius: 4px; padding: 7px 9px; background: #e89424; color: #fff; cursor: pointer; }
     #${ROOT_ID} .th-arcadia-network-items { display: grid; gap: 5px; margin-top: 8px; }
+    #${ROOT_ID} .th-arcadia-pager { display: flex; align-items: center; justify-content: center; gap: 4px; margin-top: 8px; }
+    #${ROOT_ID} .th-arcadia-pager button { min-width: 28px; border: 0; border-radius: 4px; padding: 5px 7px; background: #333; color: #fff; cursor: pointer; }
+    #${ROOT_ID} .th-arcadia-pager button:disabled { opacity: .35; cursor: default; }
+    #${ROOT_ID} .th-arcadia-pager-label { min-width: 82px; color: #bbb; text-align: center; font-size: 12px; }
     #${ROOT_ID} .th-arcadia-workshop-filters { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 8px; }
     #${ROOT_ID} .th-arcadia-workshop-filters input { grid-column: 1 / -1; box-sizing: border-box; width: 100%; border: 1px solid #ffffff2a; border-radius: 4px; padding: 7px; background: #111; color: #fff; }
     #${ROOT_ID} .th-arcadia-workshop-filters select { min-width: 0; box-sizing: border-box; width: 100%; border: 1px solid #ffffff2a; border-radius: 4px; padding: 7px; background: #111; color: #fff; }
@@ -443,6 +447,8 @@
   const networkState = root.querySelector('.th-arcadia-network-user-state');
   const networkActions = root.querySelector('.th-arcadia-network-actions');
   const networkItems = root.querySelector('.th-arcadia-network-items');
+  const workshopPager = root.querySelector('.th-arcadia-workshop-pager');
+  const mainlinePager = root.querySelector('.th-arcadia-mainline-pager');
   const mainlineCategory = root.querySelector('.th-arcadia-mainline-category');
   const mainlineSort = root.querySelector('.th-arcadia-mainline-sort');
   const mainlineSearch = root.querySelector('.th-arcadia-mainline-search');
@@ -454,6 +460,8 @@
   const workshopSearch = root.querySelector('.th-arcadia-workshop-search');
   const uploadMainlineButton = root.querySelector('.th-arcadia-upload-mainline');
   let uploadInProgress = false;
+  let workshopOffset = 0;
+  let mainlineOffset = 0;
   let networkSession = null;
   try { networkSession = JSON.parse(localStorage.getItem('th-arcadia-network-session') || 'null'); } catch (_) {}
   networkUser.value = networkSession?.username || '';
@@ -791,7 +799,12 @@
     content.hidden = show || editMode || !selectedEntry;
     editor.hidden = show || !editMode || !selectedEntry;
     empty.hidden = show || !!selectedEntry;
-    if (show) { updateNetworkState(); refreshSourceIndex(); }
+    if (show) {
+      root.querySelectorAll('.th-arcadia-network-panel > .th-arcadia-settings-module').forEach(module => { module.open = false; });
+      workshopOffset = 0;
+      mainlineOffset = 0;
+      updateNetworkState(); refreshSourceIndex();
+    }
   }
   function updateNetworkState() {
     const loggedIn = Boolean(networkSession?.token);
@@ -812,6 +825,15 @@
   }
   function escapeHtml(value) {
     return String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
+  }
+  function renderPager(container, total, offset, onPage) {
+    const limit = 10; const page = Math.floor(offset / limit); const pages = Math.max(1, Math.ceil(total / limit));
+    container.className = 'th-arcadia-pager';
+    container.replaceChildren();
+    const make = (text, target, disabled) => { const button = parentDocument.createElement('button'); button.type = 'button'; button.textContent = text; button.disabled = disabled; button.addEventListener('click', () => onPage(target)); return button; };
+    container.append(make('«', 0, page <= 0), make('‹', Math.max(0, page - 1) * limit, page <= 0));
+    const label = parentDocument.createElement('span'); label.className = 'th-arcadia-pager-label'; label.textContent = `(${page + 1}/${pages})`; container.append(label);
+    container.append(make('›', Math.min(pages - 1, page + 1) * limit, page >= pages - 1), make('»', (pages - 1) * limit, page >= pages - 1));
   }
   function workshopTaggedSections(content) {
     const raw = String(content || '');
@@ -879,25 +901,27 @@
   async function networkLoadWorkshop() {
     if (!networkSession?.token) return;
     try {
-      const params = new URLSearchParams({ category: workshopCategory.value, sort: workshopSort.value, q: workshopSearch.value.trim() });
+      const params = new URLSearchParams({ category: workshopCategory.value, sort: workshopSort.value, q: workshopSearch.value.trim(), offset: String(workshopOffset) });
       const r = await fetch(`${networkSession.api}/api/worldbook/workshop?${params}`, { headers: networkHeaders() }); const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(networkError(d, '读取失败'));
       networkItems.innerHTML = d.items?.length ? d.items.map((item, index) => `<details class="th-arcadia-network-item" data-index="${index}"><summary><span class="th-arcadia-network-item-title">${escapeHtml(item.name || '未命名条目')}</span><span class="th-arcadia-network-item-author">上传者：${escapeHtml(item.authorName || '未知')}</span><span class="th-arcadia-network-item-stats">下载 ${item.downloadCount || 0} · 赞 ${item.likeCount || 0} · 举报 ${item.reportCount || 0}</span><button type="button" class="th-arcadia-network-collapse-item">折叠本栏目</button><span class="th-arcadia-network-item-actions"><button type="button" class="th-arcadia-network-download">下载</button><button type="button" class="th-arcadia-network-like">赞</button><button type="button" class="th-arcadia-network-report">踩</button></span></summary><div class="th-arcadia-network-item-body"><div class="th-arcadia-workshop-sections">${workshopTaggedSections(item.content)}</div></div></details>`).join('') : '<div class="th-arcadia-settings-hint">没有符合条件的条目</div>';
       networkItems.querySelectorAll('.th-arcadia-workshop-section').forEach(section => { section.open = false; });
       networkItems.querySelectorAll('.th-arcadia-network-collapse-item').forEach(button => button.addEventListener('click', event => { event.preventDefault(); event.stopPropagation(); button.closest('.th-arcadia-network-item')?.querySelectorAll('.th-arcadia-workshop-section').forEach(section => { section.open = false; }); }));
       networkItems.querySelectorAll('.th-arcadia-network-download').forEach(button => button.addEventListener('click', event => { event.preventDefault(); event.stopPropagation(); downloadWorkshopItem(d.items[Number(button.closest('.th-arcadia-network-item')?.dataset.index)]); }));
       networkItems.querySelectorAll('.th-arcadia-network-like, .th-arcadia-network-report').forEach(button => button.addEventListener('click', async event => { event.preventDefault(); event.stopPropagation(); const item = d.items[Number(button.closest('.th-arcadia-network-item')?.dataset.index)]; const action = button.classList.contains('th-arcadia-network-like') ? 'like' : 'report'; try { const response = await fetch(`${networkSession.api}/api/worldbook/workshop/${encodeURIComponent(item.id)}/${action}`, { method: 'POST', headers: networkHeaders() }); const data = await response.json().catch(() => ({})); if (!response.ok) throw new Error(networkError(data, '操作失败')); button.disabled = true; setStatus(action === 'like' ? `已点赞：${item.name}` : `已举报：${item.name}`); } catch (error) { setStatus(error.message); } }));
+      renderPager(workshopPager, d.total || 0, workshopOffset, offset => { workshopOffset = offset; networkLoadWorkshop(); });
       setStatus(`已读取 ${d.items?.length || 0} 个创意工坊条目`);
     } catch (error) { setStatus(`读取失败：${error.message}`); }
   }
   async function networkLoadMainline() {
     if (!networkSession?.token) return;
     try {
-      const params = new URLSearchParams({ category: mainlineCategory.value, sort: mainlineSort.value, q: mainlineSearch.value.trim() });
+      const params = new URLSearchParams({ category: mainlineCategory.value, sort: mainlineSort.value, q: mainlineSearch.value.trim(), offset: String(mainlineOffset) });
       const response = await fetch(`${networkSession.api}/api/worldbook?${params}`, { headers: networkHeaders() });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(networkError(data, '读取失败'));
       mainlineItems.innerHTML = data.items?.length ? data.items.map((item, index) => `<details class="th-arcadia-network-item" data-index="${index}"><summary><span class="th-arcadia-network-item-title">${escapeHtml(item.name || '未命名条目')}</span><span class="th-arcadia-network-item-author">上传者：${escapeHtml(item.authorName || '管理员')}</span><span class="th-arcadia-network-item-stats">${item.updatedAt ? escapeHtml(new Date(item.updatedAt).toLocaleDateString()) : ''}</span></summary><div class="th-arcadia-network-item-body"><div class="th-arcadia-workshop-sections">${workshopTaggedSections(item.content)}</div></div></details>`).join('') : '<div class="th-arcadia-settings-hint">没有符合条件的条目</div>';
       mainlineItems.querySelectorAll('.th-arcadia-workshop-section').forEach(section => { section.open = false; });
+      renderPager(mainlinePager, data.total || 0, mainlineOffset, offset => { mainlineOffset = offset; networkLoadMainline(); });
       setStatus(`已读取 ${data.items?.length || 0} 个世界书本体条目`);
     } catch (error) { setStatus(`读取世界书本体失败：${error.message}`); }
   }
@@ -1186,16 +1210,16 @@
   // 上传世界书已移入编辑模式；联网页不再渲染旧的上传按钮。
   // 不要因为可选控件缺失而中断后续的悬浮球定位和拖拽初始化。
   root.querySelector('.th-arcadia-network-list').addEventListener('click', networkLoadWorkshop);
-  workshopCategory.addEventListener('change', networkLoadWorkshop);
-  workshopSort.addEventListener('change', networkLoadWorkshop);
-  workshopSearch.addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); networkLoadWorkshop(); } });
+  workshopCategory.addEventListener('change', () => { workshopOffset = 0; networkLoadWorkshop(); });
+  workshopSort.addEventListener('change', () => { workshopOffset = 0; networkLoadWorkshop(); });
+  workshopSearch.addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); workshopOffset = 0; networkLoadWorkshop(); } });
   workshopCollapseAll.addEventListener('click', () => networkItems.querySelectorAll('details').forEach(section => { section.open = false; }));
   root.querySelector('.th-arcadia-mainline-refresh').addEventListener('click', networkLoadMainline);
   root.querySelector('.th-arcadia-mainline-update').addEventListener('click', updateMainlineWorldbook);
   root.querySelector('.th-arcadia-mainline-collapse-all').addEventListener('click', () => mainlineItems.querySelectorAll('details').forEach(section => { section.open = false; }));
-  mainlineCategory.addEventListener('change', networkLoadMainline);
-  mainlineSort.addEventListener('change', networkLoadMainline);
-  mainlineSearch.addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); networkLoadMainline(); } });
+  mainlineCategory.addEventListener('change', () => { mainlineOffset = 0; networkLoadMainline(); });
+  mainlineSort.addEventListener('change', () => { mainlineOffset = 0; networkLoadMainline(); });
+  mainlineSearch.addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); mainlineOffset = 0; networkLoadMainline(); } });
   aiWriteButton.addEventListener('click', aiWrite);
   root.querySelector('.th-arcadia-mode-run').addEventListener('click', () => setEditMode(false));
   root.querySelector('.th-arcadia-mode-edit').addEventListener('click', () => setEditMode(true));

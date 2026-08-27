@@ -241,8 +241,9 @@ const server = http.createServer(async (req, res) => {
         const existing = body.id ? repository.getWorldbookEntry(String(body.id)) : null;
         if (!CATEGORIES.includes(body.category || '商品')) throw new ValidationError('category 不是允许的分类');
         const sameName = repository.findWorldbookByName(module, String(body.name || '').trim());
-        if (sameName && sameName.id !== body.id) return send(req, res, 409, { error: `条目名称“${body.name}”已存在，请更换名称` });
-        let item = repository.upsertWorldbookEntry({ id: body.id || crypto.randomUUID(), module, worldbookName: String(body.worldbookName || ''), uid: String(body.uid || crypto.randomUUID()), name: String(body.name || '').slice(0, 200), content: String(body.content || '').slice(0, 20000), category: body.category || '商品', strategyJson: JSON.stringify(body.strategy || {}), positionJson: JSON.stringify(body.position || {}), enabled: body.enabled === false ? 0 : 1, authorId: existing?.authorId || body.authorId || null, createdAt: existing?.createdAt || body.createdAt || now, updatedAt: now });
+        if (sameName && sameName.id !== body.id && sameName.authorId !== (existing?.authorId || body.authorId || null)) return send(req, res, 409, { error: `条目名称“${body.name}”已存在，上传者不同，不允许覆盖` });
+        const entryId = sameName && sameName.id !== body.id ? sameName.id : (body.id || crypto.randomUUID());
+        let item = repository.upsertWorldbookEntry({ id: entryId, module, worldbookName: String(body.worldbookName || ''), uid: String(body.uid || sameName?.uid || crypto.randomUUID()), name: String(body.name || '').slice(0, 200), content: String(body.content || '').slice(0, 20000), category: body.category || '商品', strategyJson: JSON.stringify(body.strategy || {}), positionJson: JSON.stringify(body.position || {}), enabled: body.enabled === false ? 0 : 1, authorId: existing?.authorId || sameName?.authorId || body.authorId || null, createdAt: existing?.createdAt || sameName?.createdAt || body.createdAt || now, updatedAt: now });
         if (item && (body.downloadCount !== undefined || body.likeCount !== undefined || body.reportCount !== undefined)) {
           item = repository.updateWorldbookStats(item.id, { downloadCount: nonNegativeInteger(body.downloadCount, item.downloadCount), likeCount: nonNegativeInteger(body.likeCount, item.likeCount), reportCount: nonNegativeInteger(body.reportCount, item.reportCount) });
         }
@@ -272,7 +273,12 @@ const server = http.createServer(async (req, res) => {
       const user = requireUser(req, res); if (!user) return;
       const module = url.pathname.startsWith('/api/worldbook/workshop') ? 'workshop' : 'worldbook';
       if (module === 'worldbook' && !isAdminUser(user)) return send(req, res, 403, { error: '世界书本体仅管理员可修改' });
-      if (req.method === 'GET') return send(req, res, 200, { items: repository.listWorldbookEntries({ module, worldbookName: url.searchParams.get('worldbook') || '', category: url.searchParams.get('category') || '', query: (url.searchParams.get('q') || '').trim().slice(0, 100), sort: url.searchParams.get('sort') || 'newest' }) });
+      if (req.method === 'GET') {
+        const allItems = repository.listWorldbookEntries({ module, worldbookName: url.searchParams.get('worldbook') || '', category: url.searchParams.get('category') || '', query: (url.searchParams.get('q') || '').trim().slice(0, 100), sort: url.searchParams.get('sort') || 'newest' });
+        const limit = 10;
+        const offset = Math.max(0, Number.parseInt(url.searchParams.get('offset') || '0', 10) || 0);
+        return send(req, res, 200, { total: allItems.length, limit, offset, items: allItems.slice(offset, offset + limit) });
+      }
       if (req.method === 'POST' && parts.length === 5 && parts[0] === 'api' && parts[1] === 'worldbook' && parts[2] === 'workshop' && parts[4] === 'download') {
         const item = repository.incrementWorldbookDownload(decodePathPart(parts[3]));
         return item ? send(req, res, 200, { item }) : send(req, res, 404, { error: '创意工坊条目不存在' });
@@ -293,8 +299,9 @@ const server = http.createServer(async (req, res) => {
         }
         if (!CATEGORIES.includes(body.category || '商品')) throw new ValidationError('category 不是允许的分类');
         const sameName = repository.findWorldbookByName(module, String(body.name || '').trim());
-        if (sameName && sameName.id !== body.id) return send(req, res, 409, { error: `条目名称“${body.name}”已存在，请更换名称` });
-        const entry = repository.upsertWorldbookEntry({ id: body.id || crypto.randomUUID(), module, worldbookName: String(body.worldbookName || ''), uid: String(body.uid || crypto.randomUUID()), name: String(body.name || '').slice(0, 200), content: String(body.content || '').slice(0, 20000), category: body.category || '商品', strategyJson: JSON.stringify(body.strategy || {}), positionJson: JSON.stringify(body.position || {}), enabled: body.enabled === false ? 0 : 1, authorId: user.id, createdAt: body.createdAt || now, updatedAt: now });
+        if (sameName && sameName.id !== body.id && sameName.authorId !== user.id) return send(req, res, 409, { error: `条目名称“${body.name}”已存在，上传者不同，不允许覆盖` });
+        const entryId = sameName && sameName.id !== body.id && sameName.authorId === user.id ? sameName.id : (body.id || crypto.randomUUID());
+        const entry = repository.upsertWorldbookEntry({ id: entryId, module, worldbookName: String(body.worldbookName || ''), uid: String(body.uid || sameName?.uid || crypto.randomUUID()), name: String(body.name || '').slice(0, 200), content: String(body.content || '').slice(0, 20000), category: body.category || '商品', strategyJson: JSON.stringify(body.strategy || {}), positionJson: JSON.stringify(body.position || {}), enabled: body.enabled === false ? 0 : 1, authorId: sameName?.authorId === user.id ? user.id : user.id, createdAt: body.createdAt || sameName?.createdAt || now, updatedAt: now });
         return send(req, res, 201, { item: entry });
       }
       if (req.method === 'DELETE' && parts.length === 4) {
