@@ -1,0 +1,21 @@
+{
+  "format": "arcadia-item",
+  "version": 1,
+  "category": "武器",
+  "name": "测试武器",
+  "order": 100,
+  "author": "测试作者",
+  "tags": ["测试", "武器"],
+  "entry": {
+    "Item_Name": "测试武器",
+    "Item_Data": "用于验证上传格式的测试内容。",
+    "Origin": "测试数据",
+    "Price": "不出售",
+    "Trigger_Keywords": "测试武器",
+    "Mechanism_Usage": "无",
+    "Core_Effects": "无",
+    "Roleplay_Scenarios": "无",
+    "Safety_Override": "无",
+    "AI_Directive": "仅用于接口测试。"
+  }
+}
