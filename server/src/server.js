@@ -141,7 +141,6 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'OPTIONS') return send(req, res, 204, null);
     if (req.method === 'GET' && url.pathname === '/admin') return sendFile(res, path.join(ROOT, 'admin', 'index.html'), 'text/html; charset=utf-8');
     if (req.method === 'GET' && (url.pathname === '/admin/users' || url.pathname === '/admin/content')) {
-      if (!isAdmin(req)) { res.writeHead(302, { Location: '/admin', 'Cache-Control': 'no-store' }); return res.end(); }
       const file = url.pathname === '/admin/users' ? 'users.html' : 'content.html';
       return sendFile(res, path.join(ROOT, 'admin', file), 'text/html; charset=utf-8');
     }

@@ -1,166 +1,37 @@
 <!doctype html>
 <html lang="zh-CN">
-  <meta charset="utf-8" /><meta
-    name="viewport"
-    content="width=device-width,initial-scale=1"
-  /><title>阿卡狄亚工坊账号</title
-  ><style>
-    body {
-      font-family: system-ui;
-      background: #171717;
-      color: #eee;
-      margin: 0;
-    }
-    .bar {
-      background: #d9a441;
-      color: #171717;
-      padding: 15px 20px;
-    }
-    .wrap {
-      max-width: 900px;
-      margin: 24px auto;
-      padding: 0 14px;
-    }
-    .panel {
-      background: #242424;
-      border: 1px solid #444;
-      border-radius: 7px;
-      padding: 16px;
-      margin-bottom: 14px;
-    }
-    .auth {
-      max-width: 400px;
-      margin: 12vh auto;
-    }
-    input,
-    button {
-      font: inherit;
-      padding: 9px;
-      border-radius: 5px;
-      border: 1px solid #555;
-      margin: 4px 0;
-    }
-    input {
-      width: 100%;
-      background: #111;
-      color: #fff;
-    }
-    button {
-      background: #d9a441;
-      border: 0;
-      cursor: pointer;
-    }
-    .muted {
-      color: #aaa;
-    }
-    .user {
-      border-top: 1px solid #444;
-      padding: 12px 0;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 10px;
-    }
-    .danger {
-      background: #c85555;
-      color: #fff;
-    }
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>阿卡狄亚工坊 · 用户管理</title>
+  <style>
+    body{font-family:system-ui;margin:0;background:#171717;color:#eee}.bar{background:#d9a441;color:#171717;padding:16px 22px;display:flex;align-items:center;gap:18px}.bar a{color:#171717;font-weight:700}.wrap{max-width:900px;margin:28px auto;padding:0 16px}.panel{background:#242424;border:1px solid #444;border-radius:8px;padding:20px}.toolbar{display:flex;justify-content:space-between;align-items:center}.user{border-top:1px solid #444;padding:14px 0;display:flex;justify-content:space-between;align-items:center;gap:12px}.user:first-child{border-top:0}button{font:inherit;padding:9px 12px;border:0;border-radius:5px;background:#d9a441;color:#171717;cursor:pointer}.danger{background:#c85555;color:#fff}.muted{color:#aaa}
   </style>
-  <header class="bar"><b>阿卡狄亚工坊 · 用户管理</b></header>
-  <main class="wrap">
-    <section id="auth" class="panel auth">
-      <h2>管理员登录</h2>
-      <input id="username" value="admin" placeholder="管理员账号" /><input
-        id="password"
-        type="password"
-        placeholder="管理员密码"
-      /><button id="submit">登录</button>
-      <p id="msg" class="muted"></p>
-    </section>
-    <section id="panel" class="panel" hidden>
-      <div>
-        <b id="who"></b
-        ><button id="logout" class="danger" style="float: right">退出</button>
-      </div>
-      <p id="state" class="muted"></p>
-      <div id="list"></div>
-    </section>
-  </main>
+</head>
+<body>
+  <header class="bar"><b>阿卡狄亚物品工坊 · 用户管理</b><a href="/admin">管理首页</a><a href="/admin/content">内容管理</a><button id="logout" class="danger">退出</button></header>
+  <main class="wrap"><section class="panel"><div class="toolbar"><h2>用户账号</h2><span id="state" class="muted">正在读取…</span></div><div id="list"></div></section></main>
   <script>
-    const $ = (id) => document.getElementById(id);
-    async function api(u, o = {}) {
-      const r = await fetch(u, {
-          credentials: "include",
-          headers: { "Content-Type": "application/json" },
-          ...o,
-        }),
-        d = await r.json().catch(() => ({}));
-      if (!r.ok) throw Error(d.error || "请求失败");
-      return d;
-    }
-    function openApp(user) {
-      $("auth").hidden = true;
-      $("panel").hidden = false;
-      $("who").textContent = user.username + "（管理员）";
-      load();
+    const $ = id => document.getElementById(id);
+    async function api(url, options = {}) {
+      const token = localStorage.getItem('arcadia_admin_token') || '';
+      const response = await fetch(url, { credentials: 'include', ...options, headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(options.headers || {}) } });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw Error(data.error || '请求失败');
+      return data;
     }
     async function load() {
       try {
-        const d = await api("/api/admin/users");
-        $("state").textContent = "共 " + d.users.length + " 个账号";
-        $("list").innerHTML = d.users
-          .map(
-            (u) =>
-              `<div class="user"><span>${u.username}　<small>${u.role}</small></span><button onclick="role('${u.id}','${u.role === "admin" ? "user" : "admin"}', this)">设为${u.role === "admin" ? "普通用户" : "管理员"}</button></div>`,
-          )
-          .join("");
-      } catch (e) {
-        $("state").textContent = e.message;
-      }
+        const me = await api('/api/auth/me');
+        if (me.user?.role !== 'admin') throw Error('当前账号不是管理员');
+        const data = await api('/api/admin/users');
+        $('state').textContent = `共 ${data.users.length} 个账号`;
+        $('list').innerHTML = data.users.map(user => `<div class="user"><span><b>${user.username}</b>　<small>${user.role}</small></span><button data-id="${user.id}" data-role="${user.role === 'admin' ? 'user' : 'admin'}">设为${user.role === 'admin' ? '普通用户' : '管理员'}</button></div>`).join('');
+        $('list').querySelectorAll('button').forEach(button => button.onclick = async () => { button.disabled = true; button.textContent = '处理中…'; try { await api(`/api/admin/users/${button.dataset.id}/role`, { method: 'POST', body: JSON.stringify({ role: button.dataset.role }) }); await load(); } catch (error) { button.disabled = false; button.textContent = '重试'; $('state').textContent = error.message; } });
+      } catch (error) { $('state').textContent = `${error.message}，请返回管理首页登录`; $('list').innerHTML = '<a href="/admin" style="color:#d9a441">返回管理首页</a>'; }
     }
-    async function role(id, r, button) {
-      const button = event?.currentTarget;
-      if (button) {
-        button.disabled = true;
-        button.textContent = "处理中…";
-      }
-      try {
-        await api("/api/admin/users/" + id + "/role", {
-          method: "POST",
-          body: JSON.stringify({ role: r }),
-        });
-        $("state").textContent = "角色更新成功";
-        await load();
-      } catch (e) {
-        $("state").textContent = e.message;
-        alert("角色更新失败：" + e.message);
-        if (button) button.disabled = false;
-      }
-    }
-    $("submit").onclick = async () => {
-      try {
-        const d = await api("/api/admin/login", {
-          method: "POST",
-          body: JSON.stringify({
-            username: $("username").value.trim(),
-            password: $("password").value,
-          }),
-        });
-        if (d.user?.role !== "admin") throw Error("该账号不是管理员");
-        openApp(d.user);
-      } catch (e) {
-        $("msg").textContent = e.message;
-      }
-    };
-    $("logout").onclick = async () => {
-      await api("/api/auth/logout", { method: "POST" });
-      location.reload();
-    };
-    (async () => {
-      try {
-        const d = await api("/api/auth/me");
-        if (d.user?.role === "admin") openApp(d.user);
-      } catch (_) {}
-    })();
+    $('logout').onclick = async () => { await api('/api/auth/logout', { method: 'POST' }).catch(() => {}); localStorage.removeItem('arcadia_admin_token'); location.href = '/admin'; };
+    load();
   </script>
+</body>
 </html>

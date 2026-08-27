@@ -161,7 +161,7 @@
       async function api(u, o = {}) {
         const r = await fetch(u, {
             credentials: "same-origin",
-            headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...(localStorage.getItem("arcadia_admin_token") ? { Authorization: "Bearer " + localStorage.getItem("arcadia_admin_token") } : {}) },
             ...o,
           }),
           d = await r.json().catch(() => ({}));
