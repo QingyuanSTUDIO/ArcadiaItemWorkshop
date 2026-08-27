@@ -246,7 +246,7 @@
       $("form").onsubmit = async (e) => {
         e.preventDefault();
         try {
-          await api("/api/admin/worldbook", {
+          const result = await api("/api/admin/worldbook", {
             method: "POST",
             body: JSON.stringify({
               id: $("id").value,
@@ -270,21 +270,34 @@
               enabled: true,
             }),
           });
-          $("msg").textContent = "已保存";
-          load();
+          if (!result.item?.id) throw Error("服务端未返回保存结果");
+          selected = result.item;
+          $("msg").textContent = "已保存：" + result.item.name;
+          await load();
         } catch (e) {
           $("msg").textContent = e.message;
         }
       };
       $("remove").onclick = async () => {
         if (selected && confirm("确定删除？")) {
-          await api("/api/admin/worldbook/" + selected.id, {
-            method: "DELETE",
-          });
-          selected = null;
-          $("form").hidden = true;
-          $("empty").hidden = false;
-          load();
+          const removing = selected;
+          try {
+            $("remove").disabled = true;
+            const result = await api(
+              "/api/admin/worldbook/" + encodeURIComponent(removing.id),
+              { method: "DELETE" },
+            );
+            if (!result.ok) throw Error("服务端没有删除该条目");
+            selected = null;
+            $("form").hidden = true;
+            $("empty").hidden = false;
+            $("msg").textContent = "已删除：" + removing.name;
+            await load();
+          } catch (e) {
+            $("msg").textContent = "删除失败：" + e.message;
+          } finally {
+            $("remove").disabled = false;
+          }
         }
       };
       $("reload").onclick = load;
