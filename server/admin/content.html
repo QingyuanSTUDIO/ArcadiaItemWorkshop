@@ -1,1 +1,274 @@
-<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>世界书内容管理</title><style>body{font-family:system-ui;color:#eee;background:#171717;margin:0}.bar{background:#d9a441;color:#171717;padding:14px 20px;display:flex;gap:15px;align-items:center}.wrap{max-width:1100px;margin:20px auto;padding:0 14px}.panel{background:#242424;border:1px solid #444;border-radius:7px;padding:14px;margin-bottom:14px}.grid{display:grid;grid-template-columns:320px 1fr;gap:14px}.row{display:flex;gap:8px;flex-wrap:wrap}.list{max-height:70vh;overflow:auto}.item{display:block;width:100%;text-align:left;background:#171717;color:#eee;border:1px solid #444;border-radius:5px;padding:9px;margin:5px 0;cursor:pointer}.item.active{border-color:#d9a441}.muted{color:#aaa;font-size:13px}label{display:block;margin:8px 0}input,textarea,select,button{font:inherit;padding:8px;border-radius:5px;border:1px solid #555}input,textarea,select{width:100%;background:#111;color:#fff}textarea{min-height:280px;resize:vertical}button{background:#d9a441;color:#171717;border:0;cursor:pointer}.danger{background:#c85555;color:#fff}@media(max-width:700px){.grid{grid-template-columns:1fr}.list{max-height:35vh}}</style><body><header class="bar"><b>阿卡狄亚工坊 · 内容管理</b><a href="/admin" style="color:#171717">条目审核</a><a href="/admin/users" style="color:#171717">用户管理</a></header><main class="wrap"><div class="panel row"><select id="module"><option value="worldbook">世界书本体</option><option value="workshop">创意工坊</option></select><input id="worldbook" placeholder="世界书名称（可选）"><button id="reload">刷新</button><span id="msg" class="muted"></span></div><div class="grid"><section class="panel"><div id="list" class="list"></div></section><section class="panel"><div id="empty" class="muted">选择左侧条目编辑</div><form id="form" hidden><input type="hidden" id="id"><label>条目名称<input id="name" required></label><label>世界书名称<input id="wb"></label><label>UID<input id="uid" required></label><label>触发策略<select id="strategy"><option value="selective">绿灯（关键词触发）</option><option value="constant">蓝灯（始终启用）</option></select></label><label>触发关键词<input id="keys" placeholder="用逗号分隔"></label><label>顺序<input id="order" type="number" step="1"></label><label>插入位置<input id="position" placeholder="after_character_definition"></label><label>条目内容<textarea id="content"></textarea></label><div class="row"><button type="submit">保存</button><button type="button" class="danger" id="remove">删除</button></div></form></section></div></main><script>const $=id=>document.getElementById(id);let items=[],selected=null;async function api(u,o={}){const r=await fetch(u,{credentials:'same-origin',headers:{'Content-Type':'application/json'},...o}),d=await r.json().catch(()=>({}));if(!r.ok)throw Error(d.error||'请求失败');return d}async function load(){try{const d=await api('/api/admin/worldbook?module='+$('module').value+'&worldbook='+encodeURIComponent($('worldbook').value));items=d.items;render();$('msg').textContent='共 '+items.length+' 条'}catch(e){$('msg').textContent=e.message}}function render(){$('list').innerHTML=items.length?items.map(i=>`<button class="item ${selected?.id===i.id?'active':''}" onclick="pick('${i.id}')">${esc(i.name)}<br><small>${i.enabled?'启用':'停用'} · ${i.strategy?.type==='constant'?'蓝灯':'绿灯'} · 顺序 ${i.position?.order??0}</small></button>`).join(''):'<p class="muted">暂无条目</p>'}function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}function pick(id){selected=items.find(i=>i.id===id);if(!selected)return;$('empty').hidden=true;$('form').hidden=false;$('id').value=selected.id;$('name').value=selected.name;$('wb').value=selected.worldbookName;$('uid').value=selected.uid;$('strategy').value=selected.strategy?.type==='constant'?'constant':'selective';$('keys').value=(selected.strategy?.keys||[]).join(',');$('order').value=selected.position?.order??0;$('position').value=selected.position?.type||'';$('content').value=selected.content||'';render()}$('form').onsubmit=async e=>{e.preventDefault();try{await api('/api/admin/worldbook',{method:'POST',body:JSON.stringify({id:$('id').value,module:$('module').value,worldbookName:$('wb').value,uid:$('uid').value,name:$('name').value,content:$('content').value,strategy:{type:$('strategy').value,keys:$('keys').value.split(/[,，]/).map(x=>x.trim()).filter(Boolean)},position:{type:$('position').value,order:Number($('order').value)||0},enabled:true})});$('msg').textContent='已保存';load()}catch(e){$('msg').textContent=e.message}};$('remove').onclick=async()=>{if(selected&&confirm('确定删除？')){await api('/api/admin/worldbook/'+selected.id,{method:'DELETE'});selected=null;$('form').hidden=true;$('empty').hidden=false;load()}};$('reload').onclick=load;$('module').onchange=load;load()</script>
+<!doctype html>
+<html lang="zh-CN">
+  <meta charset="utf-8" /><meta
+    name="viewport"
+    content="width=device-width,initial-scale=1"
+  /><title>世界书内容管理</title
+  ><style>
+    body {
+      font-family: system-ui;
+      color: #eee;
+      background: #171717;
+      margin: 0;
+    }
+    .bar {
+      background: #d9a441;
+      color: #171717;
+      padding: 14px 20px;
+      display: flex;
+      gap: 15px;
+      align-items: center;
+    }
+    .wrap {
+      max-width: 1100px;
+      margin: 20px auto;
+      padding: 0 14px;
+    }
+    .panel {
+      background: #242424;
+      border: 1px solid #444;
+      border-radius: 7px;
+      padding: 14px;
+      margin-bottom: 14px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: 320px 1fr;
+      gap: 14px;
+    }
+    .row {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .list {
+      max-height: 70vh;
+      overflow: auto;
+    }
+    .item {
+      display: block;
+      width: 100%;
+      text-align: left;
+      background: #171717;
+      color: #eee;
+      border: 1px solid #444;
+      border-radius: 5px;
+      padding: 9px;
+      margin: 5px 0;
+      cursor: pointer;
+    }
+    .item.active {
+      border-color: #d9a441;
+    }
+    .muted {
+      color: #aaa;
+      font-size: 13px;
+    }
+    label {
+      display: block;
+      margin: 8px 0;
+    }
+    input,
+    textarea,
+    select,
+    button {
+      font: inherit;
+      padding: 8px;
+      border-radius: 5px;
+      border: 1px solid #555;
+    }
+    input,
+    textarea,
+    select {
+      width: 100%;
+      background: #111;
+      color: #fff;
+    }
+    textarea {
+      min-height: 280px;
+      resize: vertical;
+    }
+    button {
+      background: #d9a441;
+      color: #171717;
+      border: 0;
+      cursor: pointer;
+    }
+    .danger {
+      background: #c85555;
+      color: #fff;
+    }
+    @media (max-width: 700px) {
+      .grid {
+        grid-template-columns: 1fr;
+      }
+      .list {
+        max-height: 35vh;
+      }
+    }
+  </style>
+  <body>
+    <header class="bar">
+      <b>阿卡狄亚工坊 · 内容管理</b
+      ><a href="/admin" style="color: #171717">条目审核</a
+      ><a href="/admin/users" style="color: #171717">用户管理</a>
+    </header>
+    <main class="wrap">
+      <div class="panel row">
+        <select id="module">
+          <option value="worldbook">世界书本体</option>
+          <option value="workshop">创意工坊</option></select
+        ><input id="worldbook" placeholder="世界书名称（可选）" /><button
+          id="reload"
+        >
+          刷新</button
+        ><span id="msg" class="muted"></span>
+      </div>
+      <div class="grid">
+        <section class="panel"><div id="list" class="list"></div></section>
+        <section class="panel">
+          <div id="empty" class="muted">选择左侧条目编辑</div>
+          <form id="form" hidden>
+            <input type="hidden" id="id" /><label
+              >条目名称<input id="name" required /></label
+            ><label>世界书名称<input id="wb" /></label
+            ><label>UID<input id="uid" required /></label
+            ><label
+              >触发策略<select id="strategy">
+                <option value="selective">绿灯（关键词触发）</option>
+                <option value="constant">蓝灯（始终启用）</option>
+              </select></label
+            ><label
+              >触发关键词<input id="keys" placeholder="用逗号分隔" /></label
+            ><label>顺序<input id="order" type="number" step="1" /></label
+            ><label
+              >插入位置<input
+                id="position"
+                placeholder="after_character_definition" /></label
+            ><label>条目内容<textarea id="content"></textarea></label>
+            <div class="row">
+              <button type="submit">保存</button
+              ><button type="button" class="danger" id="remove">删除</button>
+            </div>
+          </form>
+        </section>
+      </div>
+    </main>
+    <script>
+      const $ = (id) => document.getElementById(id);
+      let items = [],
+        selected = null;
+      async function api(u, o = {}) {
+        const r = await fetch(u, {
+            credentials: "same-origin",
+            headers: { "Content-Type": "application/json" },
+            ...o,
+          }),
+          d = await r.json().catch(() => ({}));
+        if (!r.ok) throw Error(d.error || "请求失败");
+        return d;
+      }
+      async function load() {
+        try {
+          const d = await api(
+            "/api/admin/worldbook?module=" +
+              $("module").value +
+              "&worldbook=" +
+              encodeURIComponent($("worldbook").value),
+          );
+          items = d.items;
+          render();
+          $("msg").textContent = "共 " + items.length + " 条";
+        } catch (e) {
+          $("msg").textContent = e.message;
+        }
+      }
+      function render() {
+        $("list").innerHTML = items.length
+          ? items
+              .map(
+                (i) =>
+                  `<button class="item ${selected?.id === i.id ? "active" : ""}" onclick="pick('${i.id}')">${esc(i.name)}<br><small>${i.enabled ? "启用" : "停用"} · ${i.strategy?.type === "constant" ? "蓝灯" : "绿灯"} · 顺序 ${i.position?.order ?? 0}</small></button>`,
+              )
+              .join("")
+          : '<p class="muted">暂无条目</p>';
+      }
+      function esc(s) {
+        return String(s ?? "").replace(
+          /[&<>"']/g,
+          (c) =>
+            ({
+              "&": "&amp;",
+              "<": "&lt;",
+              ">": "&gt;",
+              '"': "&quot;",
+              "'": "&#39;",
+            })[c],
+        );
+      }
+      function pick(id) {
+        selected = items.find((i) => i.id === id);
+        if (!selected) return;
+        $("empty").hidden = true;
+        $("form").hidden = false;
+        $("id").value = selected.id;
+        $("name").value = selected.name;
+        $("wb").value = selected.worldbookName;
+        $("uid").value = selected.uid;
+        $("strategy").value =
+          selected.strategy?.type === "constant" ? "constant" : "selective";
+        $("keys").value = (selected.strategy?.keys || []).join(",");
+        $("order").value = selected.position?.order ?? 0;
+        $("position").value = selected.position?.type || "";
+        $("content").value = selected.content || "";
+        render();
+      }
+      $("form").onsubmit = async (e) => {
+        e.preventDefault();
+        try {
+          await api("/api/admin/worldbook", {
+            method: "POST",
+            body: JSON.stringify({
+              id: $("id").value,
+              module: $("module").value,
+              worldbookName: $("wb").value,
+              uid: $("uid").value,
+              name: $("name").value,
+              content: $("content").value,
+              strategy: {
+                type: $("strategy").value,
+                keys: $("keys")
+                  .value.split(/[,，]/)
+                  .map((x) => x.trim())
+                  .filter(Boolean),
+              },
+              position: {
+                type: $("position").value,
+                order: Number($("order").value) || 0,
+              },
+              enabled: true,
+            }),
+          });
+          $("msg").textContent = "已保存";
+          load();
+        } catch (e) {
+          $("msg").textContent = e.message;
+        }
+      };
+      $("remove").onclick = async () => {
+        if (selected && confirm("确定删除？")) {
+          await api("/api/admin/worldbook/" + selected.id, {
+            method: "DELETE",
+          });
+          selected = null;
+          $("form").hidden = true;
+          $("empty").hidden = false;
+          load();
+        }
+      };
+      $("reload").onclick = load;
+      $("module").onchange = load;
+      load();
+    </script>
+  </body>
+</html>
