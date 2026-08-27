@@ -558,15 +558,36 @@
     const apiBase = (parentWindow.prompt('请输入工坊服务器地址', localStorage.getItem('th-arcadia-workshop-api') || '') || '').trim().replace(/\/$/, '');
     if (!apiBase) return;
     localStorage.setItem('th-arcadia-workshop-api', apiBase);
-    const username = (parentWindow.prompt('账号') || '').trim();
-    const password = parentWindow.prompt('密码') || '';
+    const authAction = parentWindow.prompt('输入 1 登录，输入 2 注册新账号', '1');
+    const username = (parentWindow.prompt('账号（3-32位）') || '').trim();
+    const password = parentWindow.prompt('密码（至少8位）') || '';
     if (!username || !password) return;
     try {
+      if (authAction === '2') {
+        const register = await fetch(`${apiBase}/api/auth/register`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password }) });
+        const registerData = await register.json().catch(() => ({}));
+        if (!register.ok) throw new Error(registerData.error || '注册失败');
+      }
       const login = await fetch(`${apiBase}/api/auth/login`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password }) });
       const loginData = await login.json().catch(() => ({}));
       if (!login.ok) throw new Error(loginData.error || '登录失败');
       const isAdmin = loginData.user?.role === 'admin';
-      const choice = parentWindow.prompt(isAdmin ? '输入 1 更新世界书本体，输入 2 上传到创意工坊' : '输入 2 上传到创意工坊');
+      const choice = parentWindow.prompt(isAdmin ? '输入 1 更新世界书本体，输入 2 上传到创意工坊，输入 3 下载创意工坊条目' : '输入 2 上传到创意工坊，输入 3 下载创意工坊条目');
+      if (choice === '3') {
+        if (!currentWorldBookName || !parentWindow.TavernHelper?.createWorldbookEntries) throw new Error('当前酒馆助手不支持写入世界书');
+        const listResponse = await fetch(`${apiBase}/api/worldbook/workshop`, { credentials: 'include' });
+        const listData = await listResponse.json().catch(() => ({}));
+        if (!listResponse.ok) throw new Error(listData.error || '读取创意工坊失败');
+        if (!listData.items?.length) throw new Error('创意工坊暂无条目');
+        const lines = listData.items.map((item, index) => `${index + 1}. ${item.name}（${item.worldbookName || '未命名世界书'}）`).join('\n');
+        const picked = Number(parentWindow.prompt(`选择要下载的条目序号：\n${lines}`)) - 1;
+        const item = listData.items[picked];
+        if (!item) throw new Error('条目序号无效');
+        await parentWindow.TavernHelper.createWorldbookEntries(currentWorldBookName, [{ name: item.name, content: item.content, strategy: item.strategy || { type: 'selective', keys: [] }, position: item.position || { type: 'after_character_definition', order: 100 }, enabled: item.enabled !== false }]);
+        await loadEntries();
+        setStatus(`已下载条目：${item.name}`);
+        return;
+      }
       const module = choice === '1' && isAdmin ? 'worldbook' : 'workshop';
       if (!entries.length) throw new Error('当前没有可同步的条目，请先刷新读取世界书');
       let success = 0;
