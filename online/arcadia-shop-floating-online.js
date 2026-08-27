@@ -567,15 +567,18 @@
         const register = await fetch(`${apiBase}/api/auth/register`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password }) });
         const registerData = await register.json().catch(() => ({}));
         if (!register.ok) throw new Error(registerData.error || '注册失败');
+        parentWindow.alert('注册成功，正在登录…');
       }
       const login = await fetch(`${apiBase}/api/auth/login`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password }) });
       const loginData = await login.json().catch(() => ({}));
       if (!login.ok) throw new Error(loginData.error || '登录失败');
+      const token = loginData.token || '';
+      const authHeaders = token ? { Authorization: `Bearer ${token}` } : {};
       const isAdmin = loginData.user?.role === 'admin';
       const choice = parentWindow.prompt(isAdmin ? '输入 1 更新世界书本体，输入 2 上传到创意工坊，输入 3 下载创意工坊条目' : '输入 2 上传到创意工坊，输入 3 下载创意工坊条目');
       if (choice === '3') {
         if (!currentWorldBookName || !parentWindow.TavernHelper?.createWorldbookEntries) throw new Error('当前酒馆助手不支持写入世界书');
-        const listResponse = await fetch(`${apiBase}/api/worldbook/workshop`, { credentials: 'include' });
+        const listResponse = await fetch(`${apiBase}/api/worldbook/workshop`, { credentials: 'include', headers: authHeaders });
         const listData = await listResponse.json().catch(() => ({}));
         if (!listResponse.ok) throw new Error(listData.error || '读取创意工坊失败');
         if (!listData.items?.length) throw new Error('创意工坊暂无条目');
@@ -593,7 +596,7 @@
       let success = 0;
       for (const entry of entries) {
         const payload = { id: `tavern-${currentWorldBookName}-${entry.uid}`, worldbookName: currentWorldBookName, uid: String(entry.uid), name: entry.name || '', content: entry.content || '', strategy: entry.strategy || {}, position: entry.position || {}, enabled: entry.enabled !== false };
-        const response = await fetch(`${apiBase}/api/worldbook${module === 'workshop' ? '/workshop' : ''}`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+        const response = await fetch(`${apiBase}/api/worldbook${module === 'workshop' ? '/workshop' : ''}`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json', ...authHeaders }, body: JSON.stringify(payload) });
         if (!response.ok) { const data = await response.json().catch(() => ({})); throw new Error(data.error || `同步“${entry.name}”失败`); }
         success += 1;
       }

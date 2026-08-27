@@ -56,7 +56,8 @@ function send(req, res, status, value, headers = {}) {
     'Content-Type': 'application/json; charset=utf-8',
     'Access-Control-Allow-Origin': origin || 'null',
     'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    'Access-Control-Allow-Credentials': 'true',
     'Vary': 'Origin',
     'X-Content-Type-Options': 'nosniff',
     ...headers,
@@ -106,8 +107,12 @@ function cookieValue(req, name) {
   const pair = String(req.headers.cookie || '').split(';').map(value => value.trim()).find(value => value.startsWith(`${name}=`));
   return pair ? decodeURIComponent(pair.slice(name.length + 1)) : '';
 }
+function authToken(req) {
+  const header = String(req.headers.authorization || '');
+  return header.startsWith('Bearer ') ? header.slice(7).trim() : cookieValue(req, 'arcadia_admin');
+}
 function isAdmin(req) {
-  const token = cookieValue(req, 'arcadia_admin');
+  const token = authToken(req);
   const session = sessions.get(token);
   if (!session || session.expiry < Date.now()) { sessions.delete(token); return false; }
   return session.role === 'admin';
@@ -117,7 +122,7 @@ function requireAdmin(req, res) {
   if (!isAdmin(req)) { send(req, res, 401, { error: '需要管理员登录' }); return false; }
   return true;
 }
-function currentUser(req) { const token = cookieValue(req, 'arcadia_admin'); const session = sessions.get(token); return session && session.expiry > Date.now() ? repository.getUser(session.userId) : null; }
+function currentUser(req) { const token = authToken(req); const session = sessions.get(token); return session && session.expiry > Date.now() ? repository.getUser(session.userId) : null; }
 function requireUser(req, res) { const user = currentUser(req); if (!user) { send(req, res, 401, { error: '需要登录' }); return null; } return user; }
 function isAdminUser(user) { return user?.role === 'admin'; }
 function sendFile(res, filename, contentType) {
@@ -139,7 +144,7 @@ const server = http.createServer(async (req, res) => {
       const account = repository.findUser(username);
       if (!account || hashPassword(body.password) !== account.password_hash) return send(req, res, 401, { error: '账号或密码错误' });
       const token = crypto.randomBytes(32).toString('hex'); sessions.set(token, { userId: account.id, role: account.role, expiry: Date.now() + 8 * 60 * 60 * 1000 });
-      return send(req, res, 200, { ok: true }, { 'Set-Cookie': `arcadia_admin=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800` });
+      return send(req, res, 200, { ok: true, token, user: repository.getUser(account.id) }, { 'Set-Cookie': `arcadia_admin=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=28800` });
     }
     if (req.method === 'POST' && url.pathname === '/api/auth/register') {
       const body = await readBody(req); const username = typeof body.username === 'string' ? body.username.trim() : '';
@@ -152,7 +157,15 @@ const server = http.createServer(async (req, res) => {
       const body = await readBody(req); const account = repository.findUser(String(body.username || '').trim());
       if (!account || hashPassword(body.password) !== account.password_hash) return send(req, res, 401, { error: '账号或密码错误' });
       const token = crypto.randomBytes(32).toString('hex'); sessions.set(token, { userId: account.id, role: account.role, expiry: Date.now() + 8 * 60 * 60 * 1000 });
-      return send(req, res, 200, { user: repository.getUser(account.id) }, { 'Set-Cookie': `arcadia_admin=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800` });
+      return send(req, res, 200, { token, user: repository.getUser(account.id) }, { 'Set-Cookie': `arcadia_admin=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=28800` });
+    }
+    if (req.method === 'GET' && url.pathname === '/api/auth/me') {
+      const user = currentUser(req);
+      return user ? send(req, res, 200, { user }) : send(req, res, 401, { error: '未登录' });
+    }
+    if (req.method === 'POST' && url.pathname === '/api/auth/logout') {
+      sessions.delete(authToken(req));
+      return send(req, res, 200, { ok: true }, { 'Set-Cookie': 'arcadia_admin=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0' });
     }
     if (req.method === 'POST' && url.pathname === '/api/admin/logout') {
       sessions.delete(cookieValue(req, 'arcadia_admin'));
