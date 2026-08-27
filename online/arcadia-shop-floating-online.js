@@ -583,15 +583,21 @@
   async function refreshSourceIndex() {
     if (!networkSession?.token) return;
     try {
-      const [mainlineResponse, workshopResponse] = await Promise.all([
-        fetch(`${networkSession.api}/api/worldbook`, { headers: networkHeaders() }),
-        fetch(`${networkSession.api}/api/worldbook/workshop`, { headers: networkHeaders() }),
-      ]);
-      const [mainline, workshop] = await Promise.all([mainlineResponse.json().catch(() => ({})), workshopResponse.json().catch(() => ({}))]);
+      const fetchAll = async path => {
+        const all = []; let offset = 0; let total = 0;
+        do {
+          const response = await fetch(`${networkSession.api}${path}${path.includes('?') ? '&' : '?'}offset=${offset}`, { headers: networkHeaders() });
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) return { ok: false, items: [] };
+          all.push(...(data.items || [])); total = Number(data.total) || all.length; offset += Number(data.limit) || 10;
+        } while (offset < total);
+        return { ok: true, items: all };
+      };
+      const [mainline, workshop] = await Promise.all([fetchAll('/api/worldbook'), fetchAll('/api/worldbook/workshop')]);
       sourceIndex = new Map();
       const sourceItems = [
-        ...(mainlineResponse.ok ? (mainline.items || []).map(item => ({ ...item, module: 'worldbook' })) : []),
-        ...(workshopResponse.ok ? (workshop.items || []).map(item => ({ ...item, module: 'workshop' })) : []),
+        ...(mainline.ok ? mainline.items.map(item => ({ ...item, module: 'worldbook' })) : []),
+        ...(workshop.ok ? workshop.items.map(item => ({ ...item, module: 'workshop' })) : []),
       ];
       sourceItems.forEach(item => {
         const key = sourceKey(item.name);
