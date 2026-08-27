@@ -64,6 +64,16 @@
       color: #aaa;
       font-size: 13px;
     }
+    .meta {
+      color: #c5c5c5;
+      font-size: 13px;
+      line-height: 1.5;
+      background: #1b1b1b;
+      border: 1px solid #3d3d3d;
+      border-radius: 5px;
+      padding: 8px 10px;
+      margin: 8px 0 12px;
+    }
     label {
       display: block;
       margin: 8px 0;
@@ -130,6 +140,7 @@
         <section class="panel">
           <div id="empty" class="muted">选择左侧条目编辑</div>
           <form id="form" hidden>
+            <div id="entryMeta" class="meta"></div>
             <input type="hidden" id="id" /><label
               >条目名称<input id="name" required /></label
             ><label
@@ -160,6 +171,7 @@
             ><label>条目内容<textarea id="content"></textarea></label>
             <div class="row"><label>下载量<input id="downloads" type="number" min="0" step="1" /></label><label>点赞量<input id="likes" type="number" min="0" step="1" /></label><label>举报量<input id="reports" type="number" min="0" step="1" /></label></div>
             <div id="reactionUsers" class="muted"></div>
+            <div class="row"><label style="flex:1;min-width:180px">目标分区<select id="transferTarget"><option value="worldbook">世界书本体</option><option value="workshop">创意工坊</option><option value="review">审核队列</option></select></label><button type="button" id="transfer">保存分区</button></div>
             <div class="row">
               <button type="submit">保存</button
               ><button type="button" class="danger" id="remove">删除</button>
@@ -210,7 +222,7 @@
           ? items
               .map(
                 (i) =>
-                  `<button class="item ${selected?.id === i.id ? "active" : ""}" onclick="pick('${i.id}')">${esc(i.name)}<br><small>${esc(i.category || "商品")} · ${i.enabled ? "启用" : "停用"} · ${i.strategy?.type === "constant" ? "蓝灯" : "绿灯"} · 顺序 ${i.position?.order ?? 0} · 下载 ${i.downloadCount ?? 0} · 赞 ${i.likeCount ?? 0} · 举报 ${i.reportCount ?? 0}</small></button>`,
+                  `<button class="item ${selected?.id === i.id ? "active" : ""}" onclick="pick('${i.id}')">${esc(i.name)}<br><small>${esc(i.category || "商品")} · ${i.enabled ? "启用" : "停用"} · ${i.strategy?.type === "constant" ? "蓝灯" : "绿灯"} · 顺序 ${i.position?.order ?? 0} · 上传者 ${esc(i.authorName || "未知")} · 更新 ${formatDate(i.updatedAt)}</small></button>`,
               )
               .join("")
           : '<p class="muted">暂无条目</p>';
@@ -228,11 +240,17 @@
             })[c],
         );
       }
+      function formatDate(value) {
+        if (!value) return "未知";
+        const date = new Date(value);
+        return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
+      }
       function pick(id) {
         selected = items.find((i) => i.id === id);
         if (!selected) return;
         $("empty").hidden = true;
         $("form").hidden = false;
+        $("entryMeta").innerHTML = "上传者：<b>" + esc(selected.authorName || "未知") + "</b>（ID：" + esc(selected.authorId || "未知") + "）<br>创建时间：" + esc(formatDate(selected.createdAt)) + "<br>最后更新：" + esc(formatDate(selected.updatedAt)) + "<br>当前分区：" + esc(moduleLabel(selected.module, selected.moderationStatus));
         $("id").value = selected.id;
         $("name").value = selected.name;
         $("category").value = selected.category || "商品";
@@ -256,6 +274,10 @@
           })
           .catch((error) => { $("reactionUsers").textContent = "互动账号读取失败：" + error.message; });
         render();
+      }
+      function moduleLabel(module, moderationStatus) {
+        if (moderationStatus === "review") return "审核队列";
+        return module === "worldbook" ? "世界书本体" : "创意工坊";
       }
       $("form").onsubmit = async (e) => {
         e.preventDefault();
@@ -316,6 +338,14 @@
             $("remove").disabled = false;
           }
         }
+      };
+      $("transfer").onclick = async () => {
+        if (!selected) return;
+        try {
+          await api("/api/admin/worldbook/" + encodeURIComponent(selected.id) + "/transfer", { method: "POST", body: JSON.stringify({ targetModule: $("transferTarget").value }) });
+          $("msg").textContent = "已保存到：" + $("transferTarget").selectedOptions[0].textContent + "（原条目仍保留）";
+          await load();
+        } catch (e) { $("msg").textContent = "转移失败：" + e.message; }
       };
       $("reload").onclick = load;
       $("module").onchange = load;

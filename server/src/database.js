@@ -173,6 +173,25 @@ export function createRepository(db, reportLimit = 5) {
       db.prepare('UPDATE worldbook_entries SET download_count = ?, like_count = ?, report_count = ? WHERE id = ?').run(stats.downloadCount, stats.likeCount, stats.reportCount, id);
       return this.getWorldbookEntry(id);
     },
+    transferWorldbookEntry(id, targetModule) {
+      const source = db.prepare('SELECT * FROM worldbook_entries WHERE id = ?').get(id);
+      if (!source) return { kind: 'missing' };
+      const module = targetModule === 'review' ? 'workshop' : targetModule;
+      const moderationStatus = targetModule === 'review' ? 'review' : 'published';
+      if (!['worldbook', 'workshop'].includes(module)) return { kind: 'invalid' };
+      const targetByName = db.prepare('SELECT * FROM worldbook_entries WHERE module = ? AND name = ? LIMIT 1').get(module, source.name);
+      const target = targetByName || db.prepare('SELECT * FROM worldbook_entries WHERE module = ? AND worldbook_name = ? AND uid = ? LIMIT 1').get(module, source.worldbook_name, source.uid);
+      if (target && target.author_id !== source.author_id) return { kind: 'conflict' };
+      // The source id is normally stable across transfers, but protect against
+      // an unrelated record already occupying the derived id.
+      let idToUse = target?.id || `${source.id}-${module}`;
+      const idCollision = db.prepare('SELECT id FROM worldbook_entries WHERE id = ?').get(idToUse);
+      if (idCollision && !target) idToUse = `${source.id}-${module}-${Date.now()}`;
+      db.prepare(`INSERT INTO worldbook_entries (id,module,worldbook_name,uid,name,content,category,strategy_json,position_json,enabled,author_id,created_at,updated_at,moderation_status,download_count,like_count,report_count)
+        VALUES (@id,@module,@worldbookName,@uid,@name,@content,@category,@strategyJson,@positionJson,@enabled,@authorId,@createdAt,@updatedAt,@moderationStatus,@downloadCount,@likeCount,@reportCount)
+        ON CONFLICT(id) DO UPDATE SET module=excluded.module,worldbook_name=excluded.worldbook_name,uid=excluded.uid,name=excluded.name,content=excluded.content,category=excluded.category,strategy_json=excluded.strategy_json,position_json=excluded.position_json,enabled=excluded.enabled,author_id=excluded.author_id,updated_at=excluded.updated_at,moderation_status=excluded.moderation_status`).run({ id: idToUse, module, worldbookName: source.worldbook_name, uid: source.uid, name: source.name, content: source.content, category: source.category, strategyJson: source.strategy_json, positionJson: source.position_json, enabled: source.enabled, authorId: source.author_id, createdAt: source.created_at, updatedAt: new Date().toISOString(), moderationStatus, downloadCount: source.download_count || 0, likeCount: source.like_count || 0, reportCount: source.report_count || 0 });
+      return { kind: 'ok', item: this.getWorldbookEntry(idToUse) };
+    },
     getWorldbookEntry(id) { const row = db.prepare('SELECT * FROM worldbook_entries WHERE id = ?').get(id); return row ? entryRow(row) : null; },
     findWorldbookByName(module, name) { const row = db.prepare('SELECT * FROM worldbook_entries WHERE module = ? AND name = ? LIMIT 1').get(module, name); return row ? entryRow(row) : null; },
     deleteWorldbookEntry(id) { return db.prepare('DELETE FROM worldbook_entries WHERE id = ?').run(id).changes > 0; },

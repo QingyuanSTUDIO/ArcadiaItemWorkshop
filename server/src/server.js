@@ -256,6 +256,14 @@ const server = http.createServer(async (req, res) => {
           ? send(req, res, 200, { ok: true })
           : send(req, res, 404, { error: '条目不存在，可能已经被删除' });
       }
+      if (req.method === 'POST' && parts.length === 5 && parts[0] === 'api' && parts[1] === 'admin' && parts[2] === 'worldbook' && parts[4] === 'transfer') {
+        const body = await readBody(req);
+        const result = repository.transferWorldbookEntry(decodePathPart(parts[3]), body.targetModule);
+        if (result.kind === 'missing') return send(req, res, 404, { error: '条目不存在' });
+        if (result.kind === 'conflict') return send(req, res, 409, { error: '目标区域存在其他上传者的同名条目，无法转移' });
+        if (result.kind === 'invalid') return send(req, res, 400, { error: '目标区域不合法' });
+        return send(req, res, 200, { item: result.item });
+      }
       if (req.method === 'POST' && parts.length === 5 && parts[0] === 'api' && parts[1] === 'admin' && parts[2] === 'users' && parts[4] === 'role') {
         const body = await readBody(req); if (!['user', 'admin'].includes(body.role)) throw new ValidationError('role 不合法');
         const user = repository.setUserRole(parts[3], body.role); return user ? send(req, res, 200, { user }) : send(req, res, 404, { error: '用户不存在' });
