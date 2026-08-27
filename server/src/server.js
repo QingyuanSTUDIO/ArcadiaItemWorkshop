@@ -17,6 +17,11 @@ const trustProxy = process.env.TRUST_PROXY === 'true';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
 const sessions = new Map();
 const repository = createRepository(openDatabase(path.join(ROOT, 'data', 'workshop.sqlite')));
+const hashPassword = value => crypto.createHash('sha256').update(String(value)).digest('hex');
+if (ADMIN_PASSWORD && repository.listUsers().length === 0) {
+  const now = new Date().toISOString();
+  repository.createUser({ id: crypto.randomUUID(), username: process.env.ADMIN_USERNAME || 'admin', passwordHash: hashPassword(ADMIN_PASSWORD), role: 'admin', createdAt: now, updatedAt: now });
+}
 
 function loadEnvFile(filename) {
   try {
@@ -103,15 +108,17 @@ function cookieValue(req, name) {
 }
 function isAdmin(req) {
   const token = cookieValue(req, 'arcadia_admin');
-  const expiry = sessions.get(token);
-  if (!expiry || expiry < Date.now()) { sessions.delete(token); return false; }
-  return true;
+  const session = sessions.get(token);
+  if (!session || session.expiry < Date.now()) { sessions.delete(token); return false; }
+  return session.role === 'admin';
 }
 function requireAdmin(req, res) {
   if (!ADMIN_PASSWORD) { send(req, res, 503, { error: '服务端尚未设置 ADMIN_PASSWORD' }); return false; }
   if (!isAdmin(req)) { send(req, res, 401, { error: '需要管理员登录' }); return false; }
   return true;
 }
+function currentUser(req) { const token = cookieValue(req, 'arcadia_admin'); const session = sessions.get(token); return session && session.expiry > Date.now() ? repository.getUser(session.userId) : null; }
+function requireUser(req, res) { const user = currentUser(req); if (!user) { send(req, res, 401, { error: '需要登录' }); return null; } return user; }
 function sendFile(res, filename, contentType) {
   try { res.writeHead(200, { 'Content-Type': contentType, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' }); res.end(fs.readFileSync(filename)); }
   catch { res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }); res.end('Not found'); }
@@ -125,11 +132,24 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && url.pathname === '/admin') return sendFile(res, path.join(ROOT, 'admin', 'index.html'), 'text/html; charset=utf-8');
     if (req.method === 'POST' && url.pathname === '/api/admin/login') {
       const body = await readBody(req);
-      const expected = crypto.createHash('sha256').update(ADMIN_PASSWORD).digest();
-      const actual = crypto.createHash('sha256').update(typeof body.password === 'string' ? body.password : '').digest();
-      if (!ADMIN_PASSWORD || !crypto.timingSafeEqual(actual, expected)) return send(req, res, 401, { error: '管理员密码错误' });
-      const token = crypto.randomBytes(32).toString('hex'); sessions.set(token, Date.now() + 8 * 60 * 60 * 1000);
+      const username = typeof body.username === 'string' ? body.username.trim() : '';
+      const account = repository.findUser(username);
+      if (!account || hashPassword(body.password) !== account.password_hash) return send(req, res, 401, { error: '账号或密码错误' });
+      const token = crypto.randomBytes(32).toString('hex'); sessions.set(token, { userId: account.id, role: account.role, expiry: Date.now() + 8 * 60 * 60 * 1000 });
       return send(req, res, 200, { ok: true }, { 'Set-Cookie': `arcadia_admin=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800` });
+    }
+    if (req.method === 'POST' && url.pathname === '/api/auth/register') {
+      const body = await readBody(req); const username = typeof body.username === 'string' ? body.username.trim() : '';
+      if (!/^[\w-]{3,32}$/.test(username) || typeof body.password !== 'string' || body.password.length < 8) throw new ValidationError('用户名需为 3-32 位字母、数字、下划线或短横线，密码至少 8 位');
+      if (repository.findUser(username)) return send(req, res, 409, { error: '用户名已存在' });
+      const now = new Date().toISOString(); const user = repository.createUser({ id: crypto.randomUUID(), username, passwordHash: hashPassword(body.password), role: 'user', createdAt: now, updatedAt: now });
+      return send(req, res, 201, { user });
+    }
+    if (req.method === 'POST' && url.pathname === '/api/auth/login') {
+      const body = await readBody(req); const account = repository.findUser(String(body.username || '').trim());
+      if (!account || hashPassword(body.password) !== account.password_hash) return send(req, res, 401, { error: '账号或密码错误' });
+      const token = crypto.randomBytes(32).toString('hex'); sessions.set(token, { userId: account.id, role: account.role, expiry: Date.now() + 8 * 60 * 60 * 1000 });
+      return send(req, res, 200, { user: repository.getUser(account.id) }, { 'Set-Cookie': `arcadia_admin=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800` });
     }
     if (req.method === 'POST' && url.pathname === '/api/admin/logout') {
       sessions.delete(cookieValue(req, 'arcadia_admin'));
@@ -145,6 +165,11 @@ const server = http.createServer(async (req, res) => {
         const filter = { query: (url.searchParams.get('q') || '').trim().slice(0, 100), status: url.searchParams.get('status') || '', limit: parseInteger(url.searchParams.get('limit'), 100, 1, 200), offset: parseInteger(url.searchParams.get('offset'), 0, 0, 1_000_000) };
         return send(req, res, 200, { total: repository.adminCount(filter), items: repository.adminList(filter) });
       }
+      if (req.method === 'GET' && url.pathname === '/api/admin/users') return send(req, res, 200, { users: repository.listUsers() });
+      if (req.method === 'POST' && parts.length === 5 && parts[0] === 'api' && parts[1] === 'admin' && parts[2] === 'users' && parts[4] === 'role') {
+        const body = await readBody(req); if (!['user', 'admin'].includes(body.role)) throw new ValidationError('role 不合法');
+        const user = repository.setUserRole(parts[3], body.role); return user ? send(req, res, 200, { user }) : send(req, res, 404, { error: '用户不存在' });
+      }
       if (req.method === 'POST' && parts.length === 5 && parts[0] === 'api' && parts[1] === 'admin' && parts[2] === 'items') {
         const id = parts[3];
         if (parts[4] === 'delete') return send(req, res, 200, { ok: repository.delete(id) });
@@ -154,6 +179,16 @@ const server = http.createServer(async (req, res) => {
         }
       }
       return send(req, res, 404, { error: '管理员接口不存在' });
+    }
+    if (url.pathname.startsWith('/api/worldbook')) {
+      const user = requireUser(req, res); if (!user) return;
+      const module = url.pathname.startsWith('/api/worldbook/workshop') ? 'workshop' : 'worldbook';
+      if (req.method === 'GET') return send(req, res, 200, { items: repository.listWorldbookEntries({ module, worldbookName: url.searchParams.get('worldbook') || '' }) });
+      if (req.method === 'POST') {
+        const body = await readBody(req); const now = new Date().toISOString();
+        const entry = repository.upsertWorldbookEntry({ id: body.id || crypto.randomUUID(), module, worldbookName: String(body.worldbookName || ''), uid: String(body.uid || crypto.randomUUID()), name: String(body.name || '').slice(0, 200), content: String(body.content || '').slice(0, 20000), strategyJson: JSON.stringify(body.strategy || {}), positionJson: JSON.stringify(body.position || {}), enabled: body.enabled === false ? 0 : 1, authorId: user.id, createdAt: body.createdAt || now, updatedAt: now });
+        return send(req, res, 201, { item: entry });
+      }
     }
     if (req.method === 'GET' && url.pathname === '/api/health') {
       return send(req, res, 200, { ok: true, service: 'arcadia-item-workshop', version: '0.1.0' });

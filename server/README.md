@@ -11,6 +11,8 @@
 - 举报去重；同一来源对同一条目只能计数一次；
 - 达到 5 个有效举报后自动隐藏，数据库保留记录供以后审核；
 - `/admin` 管理页面，管理员登录后可搜索、查看、隐藏、恢复和软删除条目；
+- 用户注册和登录；管理员可通过接口管理用户角色；
+- 世界书本体与创意工坊两个模块的条目同步接口，保存蓝绿灯策略、触发词、顺序和完整内容；
 - SQLite WAL 模式，适合单机轻量服务。
 
 ## 本地启动
@@ -58,6 +60,8 @@ pm2 stop arcadia-item-workshop
 7. 复制 `.env.example` 为 `.env`，设置 `ADMIN_PASSWORD`，把 `ALLOWED_ORIGINS` 改为实际前端来源，并在宝塔环境变量中配置这些值。
 
 管理员页面：`http://服务器公网IP:8787/admin`。
+
+首次启动时，如果数据库还没有用户，会使用 `ADMIN_USERNAME` 和 `ADMIN_PASSWORD` 自动创建管理员账号。后续普通用户可通过 `POST /api/auth/register` 注册。世界书模块接口为 `/api/worldbook`，创意工坊模块接口为 `/api/worldbook/workshop`，均需登录。
 
 宝塔/Nginx 转发真实 IP 后，将 `TRUST_PROXY=true`，用于举报去重。数据库文件和 WAL 文件需要一起备份；备份前建议短暂停止 Node 服务。
 

@@ -33,6 +33,31 @@ export function openDatabase(filename) {
     );
     CREATE INDEX IF NOT EXISTS idx_items_public ON items(status, category, item_order, name);
     CREATE INDEX IF NOT EXISTS idx_reports_item ON reports(item_id);
+    CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      username TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT 'user' CHECK(role IN ('user', 'admin')),
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
+    CREATE TABLE IF NOT EXISTS worldbook_entries (
+      id TEXT PRIMARY KEY,
+      module TEXT NOT NULL CHECK(module IN ('worldbook', 'workshop')),
+      worldbook_name TEXT NOT NULL DEFAULT '',
+      uid TEXT NOT NULL,
+      name TEXT NOT NULL,
+      content TEXT NOT NULL DEFAULT '',
+      strategy_json TEXT NOT NULL DEFAULT '{}',
+      position_json TEXT NOT NULL DEFAULT '{}',
+      enabled INTEGER NOT NULL DEFAULT 1,
+      author_id TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(module, worldbook_name, uid)
+    );
+    CREATE INDEX IF NOT EXISTS idx_worldbook_module ON worldbook_entries(module, updated_at);
   `);
   return db;
 }
@@ -44,6 +69,9 @@ export function createRepository(db, reportLimit = 5) {
   `);
   const getPublic = db.prepare("SELECT * FROM items WHERE id = ? AND status = 'published'");
   const getAny = db.prepare('SELECT * FROM items WHERE id = ?');
+  const getUserByUsername = db.prepare('SELECT * FROM users WHERE username = ?');
+  const getUserById = db.prepare('SELECT id, username, role, created_at, updated_at FROM users WHERE id = ?');
+  const entryRow = row => ({ id: row.id, module: row.module, worldbookName: row.worldbook_name, uid: row.uid, name: row.name, content: row.content, strategy: JSON.parse(row.strategy_json), position: JSON.parse(row.position_json), enabled: Boolean(row.enabled), authorId: row.author_id, createdAt: row.created_at, updatedAt: row.updated_at });
   const insertReport = db.prepare('INSERT INTO reports (item_id, reporter_hash, reason, created_at) VALUES (?, ?, ?, ?)');
   const updateReportCount = db.prepare(`
     UPDATE items
@@ -67,6 +95,28 @@ export function createRepository(db, reportLimit = 5) {
   });
 
   return {
+    createUser(user) {
+      db.prepare('INSERT INTO users (id, username, password_hash, role, created_at, updated_at) VALUES (@id, @username, @passwordHash, @role, @createdAt, @updatedAt)').run(user);
+      return getUserById.get(user.id);
+    },
+    findUser(username) { return getUserByUsername.get(username); },
+    getUser(id) { return getUserById.get(id) || null; },
+    listUsers() { return db.prepare('SELECT id, username, role, created_at, updated_at FROM users ORDER BY created_at').all(); },
+    setUserRole(id, role) {
+      const result = db.prepare("UPDATE users SET role = ?, updated_at = ? WHERE id = ?").run(role, new Date().toISOString(), id);
+      return result.changes ? getUserById.get(id) : null;
+    },
+    upsertWorldbookEntry(entry) {
+      db.prepare(`INSERT INTO worldbook_entries (id,module,worldbook_name,uid,name,content,strategy_json,position_json,enabled,author_id,created_at,updated_at)
+        VALUES (@id,@module,@worldbookName,@uid,@name,@content,@strategyJson,@positionJson,@enabled,@authorId,@createdAt,@updatedAt)
+        ON CONFLICT(module,worldbook_name,uid) DO UPDATE SET name=excluded.name,content=excluded.content,strategy_json=excluded.strategy_json,position_json=excluded.position_json,enabled=excluded.enabled,author_id=excluded.author_id,updated_at=excluded.updated_at`).run(entry);
+      return entryRow(db.prepare('SELECT * FROM worldbook_entries WHERE id = ?').get(entry.id) || db.prepare('SELECT * FROM worldbook_entries WHERE module=? AND worldbook_name=? AND uid=?').get(entry.module, entry.worldbookName, entry.uid));
+    },
+    listWorldbookEntries({ module, worldbookName = '' }) {
+      return db.prepare('SELECT * FROM worldbook_entries WHERE module = ? AND (? = "" OR worldbook_name = ?) ORDER BY CAST(json_extract(position_json, "$.order") AS INTEGER), name').all(module, worldbookName, worldbookName).map(entryRow);
+    },
+    getWorldbookEntry(id) { const row = db.prepare('SELECT * FROM worldbook_entries WHERE id = ?').get(id); return row ? entryRow(row) : null; },
+    deleteWorldbookEntry(id) { return db.prepare('DELETE FROM worldbook_entries WHERE id = ?').run(id).changes > 0; },
     create(item) {
       insertItem.run(item);
       return this.get(item.id);
