@@ -63,6 +63,7 @@
           </div>
           <button class="th-arcadia-settings-button" type="button" title="AI 设置">⚙</button>
           <button class="th-arcadia-refresh" type="button" title="重新读取世界书">↻</button>
+          <button class="th-arcadia-network" type="button" title="联网更新与创意工坊">联网</button>
           <button class="th-arcadia-close" type="button" title="关闭">×</button>
         </div>
       </header>
@@ -323,6 +324,7 @@
   const aiPresence = root.querySelector('.th-arcadia-ai-presence');
   const aiTopP = root.querySelector('.th-arcadia-ai-top-p');
   const modelButton = root.querySelector('.th-arcadia-models');
+  const networkButton = root.querySelector('.th-arcadia-network');
   const settingsSave = root.querySelector('.th-arcadia-settings-save');
   const promptSave = root.querySelector('.th-arcadia-prompt-save');
   const uiFontSize = root.querySelector('.th-arcadia-ui-font-size');
@@ -549,6 +551,34 @@
       entries = [];
       renderList();
       setStatus(`读取失败：${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  async function networkWorkshop() {
+    const apiBase = (parentWindow.prompt('请输入工坊服务器地址', localStorage.getItem('th-arcadia-workshop-api') || '') || '').trim().replace(/\/$/, '');
+    if (!apiBase) return;
+    localStorage.setItem('th-arcadia-workshop-api', apiBase);
+    const username = (parentWindow.prompt('账号') || '').trim();
+    const password = parentWindow.prompt('密码') || '';
+    if (!username || !password) return;
+    try {
+      const login = await fetch(`${apiBase}/api/auth/login`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password }) });
+      const loginData = await login.json().catch(() => ({}));
+      if (!login.ok) throw new Error(loginData.error || '登录失败');
+      const isAdmin = loginData.user?.role === 'admin';
+      const choice = parentWindow.prompt(isAdmin ? '输入 1 更新世界书本体，输入 2 上传到创意工坊' : '输入 2 上传到创意工坊');
+      const module = choice === '1' && isAdmin ? 'worldbook' : 'workshop';
+      if (!entries.length) throw new Error('当前没有可同步的条目，请先刷新读取世界书');
+      let success = 0;
+      for (const entry of entries) {
+        const payload = { id: `tavern-${currentWorldBookName}-${entry.uid}`, worldbookName: currentWorldBookName, uid: String(entry.uid), name: entry.name || '', content: entry.content || '', strategy: entry.strategy || {}, position: entry.position || {}, enabled: entry.enabled !== false };
+        const response = await fetch(`${apiBase}/api/worldbook${module === 'workshop' ? '/workshop' : ''}`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+        if (!response.ok) { const data = await response.json().catch(() => ({})); throw new Error(data.error || `同步“${entry.name}”失败`); }
+        success += 1;
+      }
+      setStatus(`已同步 ${success} 个条目到${module === 'workshop' ? '创意工坊' : '世界书本体'}`);
+    } catch (error) {
+      setStatus(`联网失败：${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -814,6 +844,7 @@
   uiModeMobile.addEventListener('click', () => { uiSettings.mode = 'mobile'; applyUiSettings(); });
   aiSource.addEventListener('change', updateAiSourceFields);
   modelButton.addEventListener('click', fetchModels);
+  networkButton.addEventListener('click', networkWorkshop);
   aiWriteButton.addEventListener('click', aiWrite);
   root.querySelector('.th-arcadia-mode-run').addEventListener('click', () => setEditMode(false));
   root.querySelector('.th-arcadia-mode-edit').addEventListener('click', () => setEditMode(true));

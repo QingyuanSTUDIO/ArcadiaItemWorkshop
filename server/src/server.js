@@ -119,6 +119,7 @@ function requireAdmin(req, res) {
 }
 function currentUser(req) { const token = cookieValue(req, 'arcadia_admin'); const session = sessions.get(token); return session && session.expiry > Date.now() ? repository.getUser(session.userId) : null; }
 function requireUser(req, res) { const user = currentUser(req); if (!user) { send(req, res, 401, { error: '需要登录' }); return null; } return user; }
+function isAdminUser(user) { return user?.role === 'admin'; }
 function sendFile(res, filename, contentType) {
   try { res.writeHead(200, { 'Content-Type': contentType, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' }); res.end(fs.readFileSync(filename)); }
   catch { res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }); res.end('Not found'); }
@@ -130,6 +131,7 @@ const server = http.createServer(async (req, res) => {
   try {
     if (req.method === 'OPTIONS') return send(req, res, 204, null);
     if (req.method === 'GET' && url.pathname === '/admin') return sendFile(res, path.join(ROOT, 'admin', 'index.html'), 'text/html; charset=utf-8');
+    if (req.method === 'GET' && url.pathname === '/admin/users') return sendFile(res, path.join(ROOT, 'admin', 'users.html'), 'text/html; charset=utf-8');
     if (req.method === 'POST' && url.pathname === '/api/admin/login') {
       const body = await readBody(req);
       const username = typeof body.username === 'string' ? body.username.trim() : '';
@@ -183,11 +185,21 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname.startsWith('/api/worldbook')) {
       const user = requireUser(req, res); if (!user) return;
       const module = url.pathname.startsWith('/api/worldbook/workshop') ? 'workshop' : 'worldbook';
+      if (module === 'worldbook' && !isAdminUser(user)) return send(req, res, 403, { error: '世界书本体仅管理员可修改' });
       if (req.method === 'GET') return send(req, res, 200, { items: repository.listWorldbookEntries({ module, worldbookName: url.searchParams.get('worldbook') || '' }) });
       if (req.method === 'POST') {
         const body = await readBody(req); const now = new Date().toISOString();
+        if (body.id) {
+          const existing = repository.getWorldbookEntry(body.id);
+          if (existing && module === 'workshop' && existing.authorId !== user.id && !isAdminUser(user)) return send(req, res, 403, { error: '只能修改自己发布的创意工坊条目' });
+        }
         const entry = repository.upsertWorldbookEntry({ id: body.id || crypto.randomUUID(), module, worldbookName: String(body.worldbookName || ''), uid: String(body.uid || crypto.randomUUID()), name: String(body.name || '').slice(0, 200), content: String(body.content || '').slice(0, 20000), strategyJson: JSON.stringify(body.strategy || {}), positionJson: JSON.stringify(body.position || {}), enabled: body.enabled === false ? 0 : 1, authorId: user.id, createdAt: body.createdAt || now, updatedAt: now });
         return send(req, res, 201, { item: entry });
+      }
+      if (req.method === 'DELETE' && parts.length === 4) {
+        const existing = repository.getWorldbookEntry(parts[3]);
+        if (!existing || (module === 'workshop' && existing.authorId !== user.id && !isAdminUser(user))) return send(req, res, 404, { error: '条目不存在或无权限' });
+        return send(req, res, 200, { ok: repository.deleteWorldbookEntry(parts[3]) });
       }
     }
     if (req.method === 'GET' && url.pathname === '/api/health') {

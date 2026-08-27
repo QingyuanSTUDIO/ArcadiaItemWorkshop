@@ -59,7 +59,7 @@ pm2 stop arcadia-item-workshop
 6. 为域名申请 HTTPS 证书。
 7. 复制 `.env.example` 为 `.env`，设置 `ADMIN_PASSWORD`，把 `ALLOWED_ORIGINS` 改为实际前端来源，并在宝塔环境变量中配置这些值。
 
-管理员页面：`http://服务器公网IP:8787/admin`。
+管理员页面：`http://服务器公网IP:8787/admin`；用户管理：`http://服务器公网IP:8787/admin/users`。
 
 首次启动时，如果数据库还没有用户，会使用 `ADMIN_USERNAME` 和 `ADMIN_PASSWORD` 自动创建管理员账号。后续普通用户可通过 `POST /api/auth/register` 注册。世界书模块接口为 `/api/worldbook`，创意工坊模块接口为 `/api/worldbook/workshop`，均需登录。
 
