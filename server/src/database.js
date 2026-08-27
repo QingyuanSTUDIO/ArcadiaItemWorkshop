@@ -54,6 +54,9 @@ export function openDatabase(filename) {
       enabled INTEGER NOT NULL DEFAULT 1,
       author_id TEXT,
       category TEXT NOT NULL DEFAULT '商品',
+      download_count INTEGER NOT NULL DEFAULT 0,
+      like_count INTEGER NOT NULL DEFAULT 0,
+      report_count INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       UNIQUE(module, worldbook_name, uid)
@@ -61,6 +64,9 @@ export function openDatabase(filename) {
     CREATE INDEX IF NOT EXISTS idx_worldbook_module ON worldbook_entries(module, updated_at);
   `);
   try { db.exec("ALTER TABLE worldbook_entries ADD COLUMN category TEXT NOT NULL DEFAULT '商品'"); } catch (error) { if (!String(error.message).includes('duplicate column')) throw error; }
+  for (const column of ['download_count', 'like_count', 'report_count']) {
+    try { db.exec(`ALTER TABLE worldbook_entries ADD COLUMN ${column} INTEGER NOT NULL DEFAULT 0`); } catch (error) { if (!String(error.message).includes('duplicate column')) throw error; }
+  }
   return db;
 }
 
@@ -81,7 +87,7 @@ export function createRepository(db, reportLimit = 5) {
       return {};
     }
   };
-  const entryRow = row => ({ id: row.id, module: row.module, worldbookName: row.worldbook_name, uid: row.uid, name: row.name, content: row.content, category: row.category || '商品', strategy: parseJsonObject(row.strategy_json), position: parseJsonObject(row.position_json), enabled: Boolean(row.enabled), authorId: row.author_id, createdAt: row.created_at, updatedAt: row.updated_at });
+  const entryRow = row => ({ id: row.id, module: row.module, worldbookName: row.worldbook_name, uid: row.uid, name: row.name, content: row.content, category: row.category || '商品', strategy: parseJsonObject(row.strategy_json), position: parseJsonObject(row.position_json), enabled: Boolean(row.enabled), authorId: row.author_id, authorName: row.author_name || '', downloadCount: Number(row.download_count) || 0, likeCount: Number(row.like_count) || 0, reportCount: Number(row.report_count) || 0, createdAt: row.created_at, updatedAt: row.updated_at });
   const insertReport = db.prepare('INSERT INTO reports (item_id, reporter_hash, reason, created_at) VALUES (?, ?, ?, ?)');
   const updateReportCount = db.prepare(`
     UPDATE items
@@ -119,15 +125,18 @@ export function createRepository(db, reportLimit = 5) {
     upsertWorldbookEntry(entry) {
       db.prepare(`INSERT INTO worldbook_entries (id,module,worldbook_name,uid,name,content,category,strategy_json,position_json,enabled,author_id,created_at,updated_at)
         VALUES (@id,@module,@worldbookName,@uid,@name,@content,@category,@strategyJson,@positionJson,@enabled,@authorId,@createdAt,@updatedAt)
-        ON CONFLICT(module,worldbook_name,uid) DO UPDATE SET name=excluded.name,content=excluded.content,category=excluded.category,strategy_json=excluded.strategy_json,position_json=excluded.position_json,enabled=excluded.enabled,author_id=excluded.author_id,updated_at=excluded.updated_at`).run(entry);
-      return entryRow(db.prepare('SELECT * FROM worldbook_entries WHERE id = ?').get(entry.id) || db.prepare('SELECT * FROM worldbook_entries WHERE module=? AND worldbook_name=? AND uid=?').get(entry.module, entry.worldbookName, entry.uid));
+        ON CONFLICT(module,worldbook_name,uid) DO UPDATE SET name=excluded.name,content=excluded.content,category=excluded.category,strategy_json=excluded.strategy_json,position_json=excluded.position_json,enabled=excluded.enabled,author_id=COALESCE(excluded.author_id,worldbook_entries.author_id),updated_at=excluded.updated_at`).run(entry);
+      return entryRow(db.prepare('SELECT e.*, u.username AS author_name FROM worldbook_entries e LEFT JOIN users u ON u.id=e.author_id WHERE e.id = ?').get(entry.id) || db.prepare('SELECT e.*, u.username AS author_name FROM worldbook_entries e LEFT JOIN users u ON u.id=e.author_id WHERE e.module=? AND e.worldbook_name=? AND e.uid=?').get(entry.module, entry.worldbookName, entry.uid));
     },
-    listWorldbookEntries({ module, worldbookName = '' }) {
+    listWorldbookEntries({ module, worldbookName = '', category = '', query = '', sort = 'newest' }) {
       // 不依赖 SQLite JSON1 扩展；宝塔环境中的 SQLite 构建可能未启用该扩展。
-      return db.prepare("SELECT * FROM worldbook_entries WHERE module = ? AND (? = '' OR worldbook_name = ?) ORDER BY name").all(module, worldbookName, worldbookName)
-        .map(entryRow)
-        .sort((a, b) => (Number(a.position?.order) || 0) - (Number(b.position?.order) || 0) || a.name.localeCompare(b.name, 'zh-CN'));
+      const rows = db.prepare("SELECT e.*, u.username AS author_name FROM worldbook_entries e LEFT JOIN users u ON u.id=e.author_id WHERE e.module = ? AND (? = '' OR e.worldbook_name = ?) AND (? = '' OR e.category = ?) AND (? = '' OR e.name LIKE ? OR COALESCE(u.username, '') LIKE ?) ORDER BY e.updated_at DESC").all(module, worldbookName, worldbookName, category, category, query, `%${query}%`, `%${query}%`).map(entryRow);
+      const compare = sort === 'oldest' ? (a, b) => a.createdAt.localeCompare(b.createdAt) : sort === 'downloads_desc' ? (a, b) => b.downloadCount - a.downloadCount : sort === 'downloads_asc' ? (a, b) => a.downloadCount - b.downloadCount : sort === 'likes_desc' ? (a, b) => b.likeCount - a.likeCount : sort === 'likes_asc' ? (a, b) => a.likeCount - b.likeCount : (a, b) => b.createdAt.localeCompare(a.createdAt);
+      return rows.sort(compare);
     },
+    incrementWorldbookDownload(id) { db.prepare('UPDATE worldbook_entries SET download_count = download_count + 1, updated_at = updated_at WHERE id = ?').run(id); return this.getWorldbookEntry(id); },
+    incrementWorldbookLike(id) { db.prepare('UPDATE worldbook_entries SET like_count = like_count + 1 WHERE id = ?').run(id); return this.getWorldbookEntry(id); },
+    incrementWorldbookReport(id) { db.prepare('UPDATE worldbook_entries SET report_count = report_count + 1 WHERE id = ?').run(id); return this.getWorldbookEntry(id); },
     getWorldbookEntry(id) { const row = db.prepare('SELECT * FROM worldbook_entries WHERE id = ?').get(id); return row ? entryRow(row) : null; },
     findWorldbookByName(module, name) { const row = db.prepare('SELECT * FROM worldbook_entries WHERE module = ? AND name = ? LIMIT 1').get(module, name); return row ? entryRow(row) : null; },
     deleteWorldbookEntry(id) { return db.prepare('DELETE FROM worldbook_entries WHERE id = ?').run(id).changes > 0; },

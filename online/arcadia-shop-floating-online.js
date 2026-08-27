@@ -154,7 +154,12 @@
             <details class="th-arcadia-settings-module th-arcadia-workshop-module">
               <summary>创意工坊</summary>
               <div class="th-arcadia-settings-module-body">
-                <div class="th-arcadia-network-actions" hidden><button class="th-arcadia-network-list" type="button">读取创意工坊</button></div>
+                <div class="th-arcadia-workshop-filters">
+                  <select class="th-arcadia-workshop-category"><option value="">全部分类</option><option>商品</option><option>综合商品</option><option>生物</option><option>药品</option><option>改造</option><option>特殊改造</option><option>装备</option><option>武器</option></select>
+                  <select class="th-arcadia-workshop-sort"><option value="newest">上传时间：最新</option><option value="oldest">上传时间：最早</option><option value="downloads_desc">下载量：从高到低</option><option value="downloads_asc">下载量：从低到高</option><option value="likes_desc">点赞量：从高到低</option><option value="likes_asc">点赞量：从低到高</option></select>
+                  <input class="th-arcadia-workshop-search" type="search" placeholder="搜索条目名或上传者">
+                </div>
+                <div class="th-arcadia-network-actions" hidden><button class="th-arcadia-network-list" type="button">获取创意工坊</button></div>
                 <div class="th-arcadia-network-items"></div>
               </div>
             </details>
@@ -281,7 +286,25 @@
     #${ROOT_ID} .th-arcadia-network-auth-row, #${ROOT_ID} .th-arcadia-network-actions { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
     #${ROOT_ID} .th-arcadia-network-auth-row button, #${ROOT_ID} .th-arcadia-network-actions button { border: 0; border-radius: 4px; padding: 7px 9px; background: #e89424; color: #fff; cursor: pointer; }
     #${ROOT_ID} .th-arcadia-network-items { display: grid; gap: 5px; margin-top: 8px; }
-    #${ROOT_ID} .th-arcadia-network-item { border: 1px solid #ffffff2a; border-radius: 4px; padding: 7px 9px; background: #111; color: #fff; cursor: pointer; text-align: left; }
+    #${ROOT_ID} .th-arcadia-workshop-filters { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 8px; }
+    #${ROOT_ID} .th-arcadia-workshop-filters input { grid-column: 1 / -1; box-sizing: border-box; width: 100%; border: 1px solid #ffffff2a; border-radius: 4px; padding: 7px; background: #111; color: #fff; }
+    #${ROOT_ID} .th-arcadia-workshop-filters select { min-width: 0; box-sizing: border-box; width: 100%; border: 1px solid #ffffff2a; border-radius: 4px; padding: 7px; background: #111; color: #fff; }
+    #${ROOT_ID} .th-arcadia-network-item { border: 1px solid #ffffff2a; border-radius: 4px; background: #111; color: #fff; overflow: hidden; }
+    #${ROOT_ID} .th-arcadia-network-item > summary { display: flex; align-items: center; gap: 8px; padding: 9px 10px 9px 16px; cursor: pointer; list-style: none; }
+    #${ROOT_ID} .th-arcadia-network-item > summary::-webkit-details-marker { display: none; }
+    #${ROOT_ID} .th-arcadia-network-item > summary::before { content: '▸'; opacity: .75; }
+    #${ROOT_ID} .th-arcadia-network-item[open] > summary::before { content: '▾'; }
+    #${ROOT_ID} .th-arcadia-network-item-title { min-width: 0; flex: 1; overflow-wrap: anywhere; }
+    #${ROOT_ID} .th-arcadia-network-item-actions { display: flex; gap: 6px; margin-left: 10px; flex: 0 0 auto; }
+    #${ROOT_ID} .th-arcadia-network-download, #${ROOT_ID} .th-arcadia-network-like, #${ROOT_ID} .th-arcadia-network-report { border: 0; border-radius: 4px; padding: 6px 10px; color: #fff; cursor: pointer; }
+    #${ROOT_ID} .th-arcadia-network-download:hover { background: #3bbd7d; }
+    #${ROOT_ID} .th-arcadia-network-download { background: #2f9e68; }
+    #${ROOT_ID} .th-arcadia-network-like { background: #2f9e68; }
+    #${ROOT_ID} .th-arcadia-network-like:hover { background: #3bbd7d; }
+    #${ROOT_ID} .th-arcadia-network-report { background: #c94343; }
+    #${ROOT_ID} .th-arcadia-network-report:hover { background: #e05757; }
+    #${ROOT_ID} .th-arcadia-network-item-meta { padding: 0 10px 8px 27px; color: #aaa; font-size: 12px; }
+    #${ROOT_ID} .th-arcadia-network-item-body { padding: 8px 10px 10px 27px; border-top: 1px solid #ffffff1c; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; color: #ddd; }
     #${ROOT_ID} .th-arcadia-network-panel input,
     #${ROOT_ID} .th-arcadia-network-panel textarea,
     #${ROOT_ID} .th-arcadia-network-panel select {
@@ -378,6 +401,9 @@
   const networkState = root.querySelector('.th-arcadia-network-user-state');
   const networkActions = root.querySelector('.th-arcadia-network-actions');
   const networkItems = root.querySelector('.th-arcadia-network-items');
+  const workshopCategory = root.querySelector('.th-arcadia-workshop-category');
+  const workshopSort = root.querySelector('.th-arcadia-workshop-sort');
+  const workshopSearch = root.querySelector('.th-arcadia-workshop-search');
   const uploadMainlineButton = root.querySelector('.th-arcadia-upload-mainline');
   let uploadInProgress = false;
   let networkSession = null;
@@ -689,6 +715,22 @@
   function networkError(data, fallback) {
     return [data?.error || fallback, data?.detail, data?.requestId && `请求编号：${data.requestId}`].filter(Boolean).join(' | ');
   }
+  function escapeHtml(value) {
+    return String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
+  }
+  async function downloadWorkshopItem(item) {
+    if (!currentWorldBookName || !parentWindow.TavernHelper?.createWorldbookEntries) { setStatus('当前环境不支持写入世界书'); return; }
+    const localName = String(item.name || '').trim();
+    if (!localName) { setStatus('该创意工坊条目没有名称，无法下载'); return; }
+    const localExists = allWorldbookEntries.some(entry => String(entry.name || '').trim() === localName);
+    if (localExists) { setStatus(`本地已有同名条目，无法下载：${localName}`); return; }
+    try {
+      await parentWindow.TavernHelper.createWorldbookEntries(currentWorldBookName, [{ name: localName, content: item.content || '', strategy: item.strategy || { type: 'selective', keys: [] }, position: item.position || { type: 'after_character_definition', order: 100 }, enabled: item.enabled !== false }]);
+      fetch(`${networkSession.api}/api/worldbook/workshop/${encodeURIComponent(item.id)}/download`, { method: 'POST', headers: networkHeaders() }).catch(() => {});
+      await loadEntries();
+      setStatus(`已下载：${localName}`);
+    } catch (error) { setStatus(`下载失败：${error.message}`); }
+  }
   async function networkAuth(register) {
     const apiBase = 'http://154.36.164.139:8787';
     const username = networkUser.value.trim(); const password = networkPass.value;
@@ -733,9 +775,11 @@
   async function networkLoadWorkshop() {
     if (!networkSession?.token) return;
     try {
-      const r = await fetch(`${networkSession.api}/api/worldbook/workshop`, { headers: networkHeaders() }); const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(networkError(d, '读取失败'));
-      networkItems.innerHTML = d.items?.length ? d.items.map((item, index) => `<button type="button" class="th-arcadia-network-item" data-index="${index}">${item.name || '未命名条目'}</button>`).join('') : '<div class="th-arcadia-settings-hint">创意工坊暂无条目</div>';
-      networkItems.querySelectorAll('.th-arcadia-network-item').forEach(button => button.addEventListener('click', async () => { const item = d.items[Number(button.dataset.index)]; if (!currentWorldBookName || !parentWindow.TavernHelper?.createWorldbookEntries) return setStatus('当前环境不支持写入世界书'); await parentWindow.TavernHelper.createWorldbookEntries(currentWorldBookName, [{ name: item.name, content: item.content, strategy: item.strategy || { type: 'selective', keys: [] }, position: item.position || { type: 'after_character_definition', order: 100 }, enabled: item.enabled !== false }]); await loadEntries(); setStatus(`已下载：${item.name}`); }));
+      const params = new URLSearchParams({ category: workshopCategory.value, sort: workshopSort.value, q: workshopSearch.value.trim() });
+      const r = await fetch(`${networkSession.api}/api/worldbook/workshop?${params}`, { headers: networkHeaders() }); const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(networkError(d, '读取失败'));
+      networkItems.innerHTML = d.items?.length ? d.items.map((item, index) => `<details class="th-arcadia-network-item" data-index="${index}"><summary><span class="th-arcadia-network-item-title">${escapeHtml(item.name || '未命名条目')}</span><span class="th-arcadia-network-item-actions"><button type="button" class="th-arcadia-network-download">下载</button><button type="button" class="th-arcadia-network-like">赞</button><button type="button" class="th-arcadia-network-report">踩</button></span></summary><div class="th-arcadia-network-item-meta">上传者：${escapeHtml(item.authorName || '未知')} · 下载 ${item.downloadCount || 0} · 点赞 ${item.likeCount || 0} · 举报 ${item.reportCount || 0}</div><div class="th-arcadia-network-item-body">${escapeHtml(item.content || '(此条目没有内容)')}</div></details>`).join('') : '<div class="th-arcadia-settings-hint">没有符合条件的条目</div>';
+      networkItems.querySelectorAll('.th-arcadia-network-download').forEach(button => button.addEventListener('click', event => { event.preventDefault(); event.stopPropagation(); downloadWorkshopItem(d.items[Number(button.closest('.th-arcadia-network-item')?.dataset.index)]); }));
+      networkItems.querySelectorAll('.th-arcadia-network-like, .th-arcadia-network-report').forEach(button => button.addEventListener('click', async event => { event.preventDefault(); event.stopPropagation(); const item = d.items[Number(button.closest('.th-arcadia-network-item')?.dataset.index)]; const action = button.classList.contains('th-arcadia-network-like') ? 'like' : 'report'; try { const response = await fetch(`${networkSession.api}/api/worldbook/workshop/${encodeURIComponent(item.id)}/${action}`, { method: 'POST', headers: networkHeaders() }); const data = await response.json().catch(() => ({})); if (!response.ok) throw new Error(networkError(data, '操作失败')); button.disabled = true; setStatus(action === 'like' ? `已点赞：${item.name}` : `已举报：${item.name}`); } catch (error) { setStatus(error.message); } }));
       setStatus(`已读取 ${d.items?.length || 0} 个创意工坊条目`);
     } catch (error) { setStatus(`读取失败：${error.message}`); }
   }
@@ -1010,6 +1054,9 @@
   // 上传世界书已移入编辑模式；联网页不再渲染旧的上传按钮。
   // 不要因为可选控件缺失而中断后续的悬浮球定位和拖拽初始化。
   root.querySelector('.th-arcadia-network-list').addEventListener('click', networkLoadWorkshop);
+  workshopCategory.addEventListener('change', networkLoadWorkshop);
+  workshopSort.addEventListener('change', networkLoadWorkshop);
+  workshopSearch.addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); networkLoadWorkshop(); } });
   aiWriteButton.addEventListener('click', aiWrite);
   root.querySelector('.th-arcadia-mode-run').addEventListener('click', () => setEditMode(false));
   root.querySelector('.th-arcadia-mode-edit').addEventListener('click', () => setEditMode(true));

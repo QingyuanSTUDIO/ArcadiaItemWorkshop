@@ -260,7 +260,16 @@ const server = http.createServer(async (req, res) => {
       const user = requireUser(req, res); if (!user) return;
       const module = url.pathname.startsWith('/api/worldbook/workshop') ? 'workshop' : 'worldbook';
       if (module === 'worldbook' && !isAdminUser(user)) return send(req, res, 403, { error: '世界书本体仅管理员可修改' });
-      if (req.method === 'GET') return send(req, res, 200, { items: repository.listWorldbookEntries({ module, worldbookName: url.searchParams.get('worldbook') || '' }) });
+      if (req.method === 'GET') return send(req, res, 200, { items: repository.listWorldbookEntries({ module, worldbookName: url.searchParams.get('worldbook') || '', category: url.searchParams.get('category') || '', query: (url.searchParams.get('q') || '').trim().slice(0, 100), sort: url.searchParams.get('sort') || 'newest' }) });
+      if (req.method === 'POST' && parts.length === 5 && parts[0] === 'api' && parts[1] === 'worldbook' && parts[2] === 'workshop' && parts[4] === 'download') {
+        const item = repository.incrementWorldbookDownload(decodePathPart(parts[3]));
+        return item ? send(req, res, 200, { item }) : send(req, res, 404, { error: '创意工坊条目不存在' });
+      }
+      if (req.method === 'POST' && parts.length === 5 && parts[0] === 'api' && parts[1] === 'worldbook' && parts[2] === 'workshop' && (parts[4] === 'like' || parts[4] === 'report')) {
+        const id = decodePathPart(parts[3]);
+        const item = parts[4] === 'like' ? repository.incrementWorldbookLike(id) : repository.incrementWorldbookReport(id);
+        return item ? send(req, res, 200, { item }) : send(req, res, 404, { error: '创意工坊条目不存在' });
+      }
       if (req.method === 'POST') {
         const body = await readBody(req); const now = new Date().toISOString();
         if (body.id) {
