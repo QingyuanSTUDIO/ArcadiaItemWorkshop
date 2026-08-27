@@ -157,6 +157,7 @@
                 id="position"
                 placeholder="after_character_definition" /></label
             ><label>条目内容<textarea id="content"></textarea></label>
+            <div class="row"><label>下载量<input id="downloads" type="number" min="0" step="1" /></label><label>点赞量<input id="likes" type="number" min="0" step="1" /></label><label>举报量<input id="reports" type="number" min="0" step="1" /></label></div>
             <div class="row">
               <button type="submit">保存</button
               ><button type="button" class="danger" id="remove">删除</button>
@@ -207,7 +208,7 @@
           ? items
               .map(
                 (i) =>
-                  `<button class="item ${selected?.id === i.id ? "active" : ""}" onclick="pick('${i.id}')">${esc(i.name)}<br><small>${esc(i.category || "商品")} · ${i.enabled ? "启用" : "停用"} · ${i.strategy?.type === "constant" ? "蓝灯" : "绿灯"} · 顺序 ${i.position?.order ?? 0}</small></button>`,
+                  `<button class="item ${selected?.id === i.id ? "active" : ""}" onclick="pick('${i.id}')">${esc(i.name)}<br><small>${esc(i.category || "商品")} · ${i.enabled ? "启用" : "停用"} · ${i.strategy?.type === "constant" ? "蓝灯" : "绿灯"} · 顺序 ${i.position?.order ?? 0} · 下载 ${i.downloadCount ?? 0} · 赞 ${i.likeCount ?? 0} · 举报 ${i.reportCount ?? 0}</small></button>`,
               )
               .join("")
           : '<p class="muted">暂无条目</p>';
@@ -241,6 +242,9 @@
         $("order").value = selected.position?.order ?? 0;
         $("position").value = selected.position?.type || "";
         $("content").value = selected.content || "";
+        $("downloads").value = selected.downloadCount ?? 0;
+        $("likes").value = selected.likeCount ?? 0;
+        $("reports").value = selected.reportCount ?? 0;
         render();
       }
       $("form").onsubmit = async (e) => {
@@ -268,6 +272,9 @@
                 order: Number($("order").value) || 0,
               },
               enabled: true,
+              downloadCount: Number($("downloads").value) || 0,
+              likeCount: Number($("likes").value) || 0,
+              reportCount: Number($("reports").value) || 0,
             }),
           });
           if (!result.item?.id) throw Error("服务端未返回保存结果");

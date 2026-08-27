@@ -48,6 +48,11 @@ function parseInteger(value, fallback, min, max) {
   return Number.isInteger(number) && number >= min && number <= max ? number : fallback;
 }
 
+function nonNegativeInteger(value, fallback = 0) {
+  const number = Number(value);
+  return Number.isInteger(number) && number >= 0 ? number : fallback;
+}
+
 function decodePathPart(value) {
   try { return decodeURIComponent(value); }
   catch { const error = new Error('URL 中的条目 ID 不合法'); error.statusCode = 400; throw error; }
@@ -233,7 +238,10 @@ const server = http.createServer(async (req, res) => {
         if (!CATEGORIES.includes(body.category || '商品')) throw new ValidationError('category 不是允许的分类');
         const sameName = repository.findWorldbookByName(module, String(body.name || '').trim());
         if (sameName && sameName.id !== body.id) return send(req, res, 409, { error: `条目名称“${body.name}”已存在，请更换名称` });
-        const item = repository.upsertWorldbookEntry({ id: body.id || crypto.randomUUID(), module, worldbookName: String(body.worldbookName || ''), uid: String(body.uid || crypto.randomUUID()), name: String(body.name || '').slice(0, 200), content: String(body.content || '').slice(0, 20000), category: body.category || '商品', strategyJson: JSON.stringify(body.strategy || {}), positionJson: JSON.stringify(body.position || {}), enabled: body.enabled === false ? 0 : 1, authorId: existing?.authorId || body.authorId || null, createdAt: existing?.createdAt || body.createdAt || now, updatedAt: now });
+        let item = repository.upsertWorldbookEntry({ id: body.id || crypto.randomUUID(), module, worldbookName: String(body.worldbookName || ''), uid: String(body.uid || crypto.randomUUID()), name: String(body.name || '').slice(0, 200), content: String(body.content || '').slice(0, 20000), category: body.category || '商品', strategyJson: JSON.stringify(body.strategy || {}), positionJson: JSON.stringify(body.position || {}), enabled: body.enabled === false ? 0 : 1, authorId: existing?.authorId || body.authorId || null, createdAt: existing?.createdAt || body.createdAt || now, updatedAt: now });
+        if (item && (body.downloadCount !== undefined || body.likeCount !== undefined || body.reportCount !== undefined)) {
+          item = repository.updateWorldbookStats(item.id, { downloadCount: nonNegativeInteger(body.downloadCount, item.downloadCount), likeCount: nonNegativeInteger(body.likeCount, item.likeCount), reportCount: nonNegativeInteger(body.reportCount, item.reportCount) });
+        }
         return send(req, res, 200, { item });
       }
       if (req.method === 'DELETE' && parts.length === 4 && parts[0] === 'api' && parts[1] === 'admin' && parts[2] === 'worldbook') {

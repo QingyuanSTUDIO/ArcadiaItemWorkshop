@@ -137,6 +137,10 @@ export function createRepository(db, reportLimit = 5) {
     incrementWorldbookDownload(id) { db.prepare('UPDATE worldbook_entries SET download_count = download_count + 1, updated_at = updated_at WHERE id = ?').run(id); return this.getWorldbookEntry(id); },
     incrementWorldbookLike(id) { db.prepare('UPDATE worldbook_entries SET like_count = like_count + 1 WHERE id = ?').run(id); return this.getWorldbookEntry(id); },
     incrementWorldbookReport(id) { db.prepare('UPDATE worldbook_entries SET report_count = report_count + 1 WHERE id = ?').run(id); return this.getWorldbookEntry(id); },
+    updateWorldbookStats(id, stats) {
+      db.prepare('UPDATE worldbook_entries SET download_count = ?, like_count = ?, report_count = ? WHERE id = ?').run(stats.downloadCount, stats.likeCount, stats.reportCount, id);
+      return this.getWorldbookEntry(id);
+    },
     getWorldbookEntry(id) { const row = db.prepare('SELECT * FROM worldbook_entries WHERE id = ?').get(id); return row ? entryRow(row) : null; },
     findWorldbookByName(module, name) { const row = db.prepare('SELECT * FROM worldbook_entries WHERE module = ? AND name = ? LIMIT 1').get(module, name); return row ? entryRow(row) : null; },
     deleteWorldbookEntry(id) { return db.prepare('DELETE FROM worldbook_entries WHERE id = ?').run(id).changes > 0; },
