@@ -184,7 +184,7 @@
             ...o,
           }),
           d = await r.json().catch(() => ({}));
-        if (!r.ok) throw Error(d.error || "请求失败");
+        if (!r.ok) throw Error([d.error, d.detail, d.requestId && `请求编号：${d.requestId}`].filter(Boolean).join("\n"));
         return d;
       }
       async function load() {

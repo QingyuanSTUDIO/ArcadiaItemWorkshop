@@ -16,6 +16,7 @@ const allowedOrigins = new Set((process.env.ALLOWED_ORIGINS || '').split(',').ma
 const trustProxy = process.env.TRUST_PROXY === 'true';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
 const SESSION_SECRET = process.env.SESSION_SECRET || ADMIN_PASSWORD || 'arcadia-item-workshop-session-secret';
+const DEBUG_ERRORS = process.env.DEBUG_ERRORS === 'true';
 const sessions = new Map();
 const repository = createRepository(openDatabase(path.join(ROOT, 'data', 'workshop.sqlite')));
 const hashPassword = value => crypto.createHash('sha256').update(String(value)).digest('hex');
@@ -164,6 +165,7 @@ function sendFile(res, filename, contentType) {
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
   const parts = url.pathname.split('/').filter(Boolean);
+  const requestId = crypto.randomBytes(6).toString('hex');
   try {
     if (req.method === 'OPTIONS') return send(req, res, 204, null);
     if (req.method === 'GET' && url.pathname === '/admin') return sendFile(res, path.join(ROOT, 'admin', 'index.html'), 'text/html; charset=utf-8');
@@ -304,8 +306,13 @@ const server = http.createServer(async (req, res) => {
     }
     return send(req, res, 404, { error: '接口不存在' });
   } catch (error) {
-    console.error(error);
-    return send(req, res, error.statusCode || 500, { error: error.statusCode ? error.message : '服务器内部错误' });
+    console.error(`[${requestId}] ${req.method} ${url.pathname}`, error);
+    const status = error.statusCode || 500;
+    return send(req, res, status, {
+      error: error.statusCode ? error.message : '服务器内部错误',
+      requestId,
+      ...(DEBUG_ERRORS ? { detail: String(error?.message || error), stack: String(error?.stack || '').split('\n').slice(0, 5).join('\n') } : {}),
+    });
   }
 });
 

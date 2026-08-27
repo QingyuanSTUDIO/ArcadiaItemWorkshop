@@ -685,6 +685,9 @@
     networkPass.value = '';
   }
   function networkHeaders() { return networkSession?.token ? { Authorization: `Bearer ${networkSession.token}` } : {}; }
+  function networkError(data, fallback) {
+    return [data?.error || fallback, data?.detail, data?.requestId && `请求编号：${data.requestId}`].filter(Boolean).join(' | ');
+  }
   async function networkAuth(register) {
     const apiBase = 'http://154.36.164.139:8787';
     const username = networkUser.value.trim(); const password = networkPass.value;
@@ -734,7 +737,7 @@
   async function networkLoadWorkshop() {
     if (!networkSession?.token) return;
     try {
-      const r = await fetch(`${networkSession.api}/api/worldbook/workshop`, { headers: networkHeaders() }); const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error || '读取失败');
+      const r = await fetch(`${networkSession.api}/api/worldbook/workshop`, { headers: networkHeaders() }); const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(networkError(d, '读取失败'));
       networkItems.innerHTML = d.items?.length ? d.items.map((item, index) => `<button type="button" class="th-arcadia-network-item" data-index="${index}">${item.name || '未命名条目'}</button>`).join('') : '<div class="th-arcadia-settings-hint">创意工坊暂无条目</div>';
       networkItems.querySelectorAll('.th-arcadia-network-item').forEach(button => button.addEventListener('click', async () => { const item = d.items[Number(button.dataset.index)]; if (!currentWorldBookName || !parentWindow.TavernHelper?.createWorldbookEntries) return setStatus('当前环境不支持写入世界书'); await parentWindow.TavernHelper.createWorldbookEntries(currentWorldBookName, [{ name: item.name, content: item.content, strategy: item.strategy || { type: 'selective', keys: [] }, position: item.position || { type: 'after_character_definition', order: 100 }, enabled: item.enabled !== false }]); await loadEntries(); setStatus(`已下载：${item.name}`); }));
       setStatus(`已读取 ${d.items?.length || 0} 个创意工坊条目`);
