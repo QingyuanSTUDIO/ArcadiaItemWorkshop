@@ -428,7 +428,7 @@
   function pickProductEntries(allEntries) {
     const visibleEntries = allEntries.filter(entry => !isSectionMarker(entry));
     const productEntries = visibleEntries.filter(entry =>
-      /^(?:商品|综合商品|生物|改造|特殊改造|装备|武器)\s*[:：]/.test(String(entry.name || '').trim()),
+      /^(?:商品|综合商品|生物|药品|改造|特殊改造|装备|武器)\s*[:：]/.test(String(entry.name || '').trim()),
     );
     // 当前世界书使用“商品：/生物：/改造：/特殊改造：”命名；其他命名风格则显示所有非分组条目。
     return productEntries.length > 0 ? productEntries : visibleEntries;
@@ -505,7 +505,7 @@
       sidebar.append(empty);
       return;
     }
-    const categories = ['商品', '综合商品', '生物', '改造', '特殊改造', '装备', '武器'];
+    const categories = ['商品', '综合商品', '生物', '药品', '改造', '特殊改造', '装备', '武器'];
     categories.forEach(category => {
       const categoryEntries = entries
         .filter(entry => getCategory(entry) === category)
@@ -555,11 +555,11 @@
 
   function getCategory(entry) {
     const name = String(entry.name || '').trim();
-    return ['特殊改造', '综合商品', '商品', '生物', '改造', '装备', '武器'].find(category => name.startsWith(`${category}：`) || name.startsWith(`${category}:`)) || '商品';
+    return ['特殊改造', '综合商品', '商品', '生物', '药品', '改造', '装备', '武器'].find(category => name.startsWith(`${category}：`) || name.startsWith(`${category}:`)) || '商品';
   }
 
   function stripCategoryPrefix(name) {
-    return String(name || '').replace(/^(?:商品|综合商品|生物|改造|特殊改造|装备|武器)\s*[:：]\s*/, '').trim();
+    return String(name || '').replace(/^(?:商品|综合商品|生物|药品|改造|特殊改造|装备|武器)\s*[:：]\s*/, '').trim();
   }
 
   async function loadEntries() {

@@ -1,5 +1,5 @@
 export const CATEGORIES = Object.freeze([
-  '商品', '综合商品', '生物', '改造', '特殊改造', '装备', '武器',
+  '商品', '综合商品', '生物', '药品', '改造', '特殊改造', '装备', '武器',
 ]);
 
 export const ENTRY_TAGS = Object.freeze([
