@@ -53,12 +53,14 @@ export function openDatabase(filename) {
       position_json TEXT NOT NULL DEFAULT '{}',
       enabled INTEGER NOT NULL DEFAULT 1,
       author_id TEXT,
+      category TEXT NOT NULL DEFAULT '商品',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       UNIQUE(module, worldbook_name, uid)
     );
     CREATE INDEX IF NOT EXISTS idx_worldbook_module ON worldbook_entries(module, updated_at);
   `);
+  try { db.exec("ALTER TABLE worldbook_entries ADD COLUMN category TEXT NOT NULL DEFAULT '商品'"); } catch (error) { if (!String(error.message).includes('duplicate column')) throw error; }
   return db;
 }
 
@@ -71,7 +73,7 @@ export function createRepository(db, reportLimit = 5) {
   const getAny = db.prepare('SELECT * FROM items WHERE id = ?');
   const getUserByUsername = db.prepare('SELECT * FROM users WHERE username = ?');
   const getUserById = db.prepare('SELECT id, username, role, created_at, updated_at FROM users WHERE id = ?');
-  const entryRow = row => ({ id: row.id, module: row.module, worldbookName: row.worldbook_name, uid: row.uid, name: row.name, content: row.content, strategy: JSON.parse(row.strategy_json), position: JSON.parse(row.position_json), enabled: Boolean(row.enabled), authorId: row.author_id, createdAt: row.created_at, updatedAt: row.updated_at });
+  const entryRow = row => ({ id: row.id, module: row.module, worldbookName: row.worldbook_name, uid: row.uid, name: row.name, content: row.content, category: row.category || '商品', strategy: JSON.parse(row.strategy_json), position: JSON.parse(row.position_json), enabled: Boolean(row.enabled), authorId: row.author_id, createdAt: row.created_at, updatedAt: row.updated_at });
   const insertReport = db.prepare('INSERT INTO reports (item_id, reporter_hash, reason, created_at) VALUES (?, ?, ?, ?)');
   const updateReportCount = db.prepare(`
     UPDATE items
@@ -107,15 +109,16 @@ export function createRepository(db, reportLimit = 5) {
       return result.changes ? getUserById.get(id) : null;
     },
     upsertWorldbookEntry(entry) {
-      db.prepare(`INSERT INTO worldbook_entries (id,module,worldbook_name,uid,name,content,strategy_json,position_json,enabled,author_id,created_at,updated_at)
-        VALUES (@id,@module,@worldbookName,@uid,@name,@content,@strategyJson,@positionJson,@enabled,@authorId,@createdAt,@updatedAt)
-        ON CONFLICT(module,worldbook_name,uid) DO UPDATE SET name=excluded.name,content=excluded.content,strategy_json=excluded.strategy_json,position_json=excluded.position_json,enabled=excluded.enabled,author_id=excluded.author_id,updated_at=excluded.updated_at`).run(entry);
+      db.prepare(`INSERT INTO worldbook_entries (id,module,worldbook_name,uid,name,content,category,strategy_json,position_json,enabled,author_id,created_at,updated_at)
+        VALUES (@id,@module,@worldbookName,@uid,@name,@content,@category,@strategyJson,@positionJson,@enabled,@authorId,@createdAt,@updatedAt)
+        ON CONFLICT(module,worldbook_name,uid) DO UPDATE SET name=excluded.name,content=excluded.content,category=excluded.category,strategy_json=excluded.strategy_json,position_json=excluded.position_json,enabled=excluded.enabled,author_id=excluded.author_id,updated_at=excluded.updated_at`).run(entry);
       return entryRow(db.prepare('SELECT * FROM worldbook_entries WHERE id = ?').get(entry.id) || db.prepare('SELECT * FROM worldbook_entries WHERE module=? AND worldbook_name=? AND uid=?').get(entry.module, entry.worldbookName, entry.uid));
     },
     listWorldbookEntries({ module, worldbookName = '' }) {
       return db.prepare('SELECT * FROM worldbook_entries WHERE module = ? AND (? = "" OR worldbook_name = ?) ORDER BY CAST(json_extract(position_json, "$.order") AS INTEGER), name').all(module, worldbookName, worldbookName).map(entryRow);
     },
     getWorldbookEntry(id) { const row = db.prepare('SELECT * FROM worldbook_entries WHERE id = ?').get(id); return row ? entryRow(row) : null; },
+    findWorldbookByName(module, name) { const row = db.prepare('SELECT * FROM worldbook_entries WHERE module = ? AND name = ? LIMIT 1').get(module, name); return row ? entryRow(row) : null; },
     deleteWorldbookEntry(id) { return db.prepare('DELETE FROM worldbook_entries WHERE id = ?').run(id).changes > 0; },
     create(item) {
       insertItem.run(item);

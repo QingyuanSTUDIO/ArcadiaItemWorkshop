@@ -131,6 +131,17 @@
           <form id="form" hidden>
             <input type="hidden" id="id" /><label
               >条目名称<input id="name" required /></label
+            ><label
+              >分类<select id="category">
+                <option>商品</option>
+                <option>综合商品</option>
+                <option>生物</option>
+                <option>药品</option>
+                <option>改造</option>
+                <option>特殊改造</option>
+                <option>装备</option>
+                <option>武器</option>
+              </select></label
             ><label>世界书名称<input id="wb" /></label
             ><label>UID<input id="uid" required /></label
             ><label
@@ -161,7 +172,15 @@
       async function api(u, o = {}) {
         const r = await fetch(u, {
             credentials: "same-origin",
-          headers: { "Content-Type": "application/json", ...(localStorage.getItem("arcadia_admin_token") ? { Authorization: "Bearer " + localStorage.getItem("arcadia_admin_token") } : {}) },
+            headers: {
+              "Content-Type": "application/json",
+              ...(localStorage.getItem("arcadia_admin_token")
+                ? {
+                    Authorization:
+                      "Bearer " + localStorage.getItem("arcadia_admin_token"),
+                  }
+                : {}),
+            },
             ...o,
           }),
           d = await r.json().catch(() => ({}));
@@ -188,7 +207,7 @@
           ? items
               .map(
                 (i) =>
-                  `<button class="item ${selected?.id === i.id ? "active" : ""}" onclick="pick('${i.id}')">${esc(i.name)}<br><small>${i.enabled ? "启用" : "停用"} · ${i.strategy?.type === "constant" ? "蓝灯" : "绿灯"} · 顺序 ${i.position?.order ?? 0}</small></button>`,
+                  `<button class="item ${selected?.id === i.id ? "active" : ""}" onclick="pick('${i.id}')">${esc(i.name)}<br><small>${esc(i.category || "商品")} · ${i.enabled ? "启用" : "停用"} · ${i.strategy?.type === "constant" ? "蓝灯" : "绿灯"} · 顺序 ${i.position?.order ?? 0}</small></button>`,
               )
               .join("")
           : '<p class="muted">暂无条目</p>';
@@ -213,6 +232,7 @@
         $("form").hidden = false;
         $("id").value = selected.id;
         $("name").value = selected.name;
+        $("category").value = selected.category || "商品";
         $("wb").value = selected.worldbookName;
         $("uid").value = selected.uid;
         $("strategy").value =
@@ -234,6 +254,7 @@
               worldbookName: $("wb").value,
               uid: $("uid").value,
               name: $("name").value,
+              category: $("category").value,
               content: $("content").value,
               strategy: {
                 type: $("strategy").value,

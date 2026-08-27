@@ -195,7 +195,10 @@ const server = http.createServer(async (req, res) => {
       }
       if (req.method === 'POST' && url.pathname === '/api/admin/worldbook') {
         const body = await readBody(req); const module = body.module === 'workshop' ? 'workshop' : 'worldbook'; const now = new Date().toISOString();
-        const item = repository.upsertWorldbookEntry({ id: body.id || crypto.randomUUID(), module, worldbookName: String(body.worldbookName || ''), uid: String(body.uid || crypto.randomUUID()), name: String(body.name || '').slice(0, 200), content: String(body.content || '').slice(0, 20000), strategyJson: JSON.stringify(body.strategy || {}), positionJson: JSON.stringify(body.position || {}), enabled: body.enabled === false ? 0 : 1, authorId: body.authorId || null, createdAt: body.createdAt || now, updatedAt: now });
+        if (!CATEGORIES.includes(body.category || '商品')) throw new ValidationError('category 不是允许的分类');
+        const sameName = repository.findWorldbookByName(module, String(body.name || '').trim());
+        if (sameName && sameName.id !== body.id) return send(req, res, 409, { error: `条目名称“${body.name}”已存在，请更换名称` });
+        const item = repository.upsertWorldbookEntry({ id: body.id || crypto.randomUUID(), module, worldbookName: String(body.worldbookName || ''), uid: String(body.uid || crypto.randomUUID()), name: String(body.name || '').slice(0, 200), content: String(body.content || '').slice(0, 20000), category: body.category || '商品', strategyJson: JSON.stringify(body.strategy || {}), positionJson: JSON.stringify(body.position || {}), enabled: body.enabled === false ? 0 : 1, authorId: body.authorId || null, createdAt: body.createdAt || now, updatedAt: now });
         return send(req, res, 200, { item });
       }
       if (req.method === 'DELETE' && parts.length === 4 && parts[0] === 'api' && parts[1] === 'admin' && parts[2] === 'worldbook') {
@@ -226,7 +229,10 @@ const server = http.createServer(async (req, res) => {
           const existing = repository.getWorldbookEntry(body.id);
           if (existing && module === 'workshop' && existing.authorId !== user.id && !isAdminUser(user)) return send(req, res, 403, { error: '只能修改自己发布的创意工坊条目' });
         }
-        const entry = repository.upsertWorldbookEntry({ id: body.id || crypto.randomUUID(), module, worldbookName: String(body.worldbookName || ''), uid: String(body.uid || crypto.randomUUID()), name: String(body.name || '').slice(0, 200), content: String(body.content || '').slice(0, 20000), strategyJson: JSON.stringify(body.strategy || {}), positionJson: JSON.stringify(body.position || {}), enabled: body.enabled === false ? 0 : 1, authorId: user.id, createdAt: body.createdAt || now, updatedAt: now });
+        if (!CATEGORIES.includes(body.category || '商品')) throw new ValidationError('category 不是允许的分类');
+        const sameName = repository.findWorldbookByName(module, String(body.name || '').trim());
+        if (sameName && sameName.id !== body.id) return send(req, res, 409, { error: `条目名称“${body.name}”已存在，请更换名称` });
+        const entry = repository.upsertWorldbookEntry({ id: body.id || crypto.randomUUID(), module, worldbookName: String(body.worldbookName || ''), uid: String(body.uid || crypto.randomUUID()), name: String(body.name || '').slice(0, 200), content: String(body.content || '').slice(0, 20000), category: body.category || '商品', strategyJson: JSON.stringify(body.strategy || {}), positionJson: JSON.stringify(body.position || {}), enabled: body.enabled === false ? 0 : 1, authorId: user.id, createdAt: body.createdAt || now, updatedAt: now });
         return send(req, res, 201, { item: entry });
       }
       if (req.method === 'DELETE' && parts.length === 4) {

@@ -93,6 +93,7 @@
             <div class="th-arcadia-editor-sections"></div>
             <button class="th-arcadia-save" type="button">保存到世界书</button>
             <button class="th-arcadia-delete" type="button">删除当前条目</button>
+            <button class="th-arcadia-upload-entry" type="button">上传当前条目到创意工坊</button>
           </div>
           <div class="th-arcadia-settings" hidden>
             <details class="th-arcadia-settings-module">
@@ -134,14 +135,13 @@
           </div>
           <div class="th-arcadia-network-panel" hidden>
             <details class="th-arcadia-settings-module" open>
-              <summary>联网与创意工坊</summary>
+              <summary>账户信息</summary>
               <div class="th-arcadia-settings-module-body">
-                <label class="th-arcadia-editor-field">服务器地址<input class="th-arcadia-network-api" type="url" placeholder="http://154.36.164.139:8787"></label>
                 <label class="th-arcadia-editor-field">账号<input class="th-arcadia-network-user" type="text"></label>
                 <label class="th-arcadia-editor-field">密码<input class="th-arcadia-network-pass" type="password"></label>
                 <div class="th-arcadia-network-auth-row"><button class="th-arcadia-network-login" type="button">登录</button><button class="th-arcadia-network-register" type="button">注册并登录</button><button class="th-arcadia-network-logout" type="button">退出登录</button></div>
                 <div class="th-arcadia-network-user-state">未登录</div>
-                <div class="th-arcadia-network-actions" hidden><button class="th-arcadia-network-upload" type="button">上传当前世界书</button><button class="th-arcadia-network-list" type="button">读取创意工坊</button></div>
+                <div class="th-arcadia-network-actions" hidden><button class="th-arcadia-network-list" type="button">打开创意工坊</button></div>
                 <div class="th-arcadia-network-items"></div>
               </div>
             </details>
@@ -337,6 +337,7 @@
   const fillButton = root.querySelector('.th-arcadia-fill');
   const collapseAllButton = root.querySelector('.th-arcadia-collapse-all');
   const deleteButton = root.querySelector('.th-arcadia-delete');
+  const uploadEntryButton = root.querySelector('.th-arcadia-upload-entry');
   const settingsButton = root.querySelector('.th-arcadia-settings-button');
   const settingsPanel = root.querySelector('.th-arcadia-settings');
   const aiPrompt = root.querySelector('.th-arcadia-ai-prompt');
@@ -353,7 +354,6 @@
   const modelButton = root.querySelector('.th-arcadia-models');
   const networkButton = root.querySelector('.th-arcadia-network');
   const networkPanel = root.querySelector('.th-arcadia-network-panel');
-  const networkApi = root.querySelector('.th-arcadia-network-api');
   const networkUser = root.querySelector('.th-arcadia-network-user');
   const networkPass = root.querySelector('.th-arcadia-network-pass');
   const networkState = root.querySelector('.th-arcadia-network-user-state');
@@ -361,7 +361,6 @@
   const networkItems = root.querySelector('.th-arcadia-network-items');
   let networkSession = null;
   try { networkSession = JSON.parse(localStorage.getItem('th-arcadia-network-session') || 'null'); } catch (_) {}
-  networkApi.value = localStorage.getItem('th-arcadia-workshop-api') || '';
   networkUser.value = networkSession?.username || '';
   const settingsSave = root.querySelector('.th-arcadia-settings-save');
   const promptSave = root.querySelector('.th-arcadia-prompt-save');
@@ -633,7 +632,7 @@
       if (!entries.length) throw new Error('当前没有可同步的条目，请先刷新读取世界书');
       let success = 0;
       for (const entry of entries) {
-        const payload = { id: `tavern-${currentWorldBookName}-${entry.uid}`, worldbookName: currentWorldBookName, uid: String(entry.uid), name: entry.name || '', content: entry.content || '', strategy: entry.strategy || {}, position: entry.position || {}, enabled: entry.enabled !== false };
+        const payload = { id: `tavern-${currentWorldBookName}-${entry.uid}`, worldbookName: currentWorldBookName, uid: String(entry.uid), name: entry.name || '', category: getCategory(entry), content: entry.content || '', strategy: entry.strategy || {}, position: entry.position || {}, enabled: entry.enabled !== false };
         const response = await fetch(`${apiBase}/api/worldbook${module === 'workshop' ? '/workshop' : ''}`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json', ...authHeaders }, body: JSON.stringify(payload) });
         if (!response.ok) { const data = await response.json().catch(() => ({})); throw new Error(data.error || `同步“${entry.name}”失败`); }
         success += 1;
@@ -657,11 +656,16 @@
     const loggedIn = Boolean(networkSession?.token);
     networkState.textContent = loggedIn ? `已登录：${networkSession.username}（${networkSession.role === 'admin' ? '管理员' : '用户'}）` : '未登录';
     networkActions.hidden = !loggedIn;
+    networkUser.hidden = loggedIn;
+    networkPass.hidden = loggedIn;
+    root.querySelector('.th-arcadia-network-login').hidden = loggedIn;
+    root.querySelector('.th-arcadia-network-register').hidden = loggedIn;
+    root.querySelector('.th-arcadia-network-logout').hidden = !loggedIn;
     networkPass.value = '';
   }
   function networkHeaders() { return networkSession?.token ? { Authorization: `Bearer ${networkSession.token}` } : {}; }
   async function networkAuth(register) {
-    const apiBase = networkApi.value.trim().replace(/\/$/, '');
+    const apiBase = 'http://154.36.164.139:8787';
     const username = networkUser.value.trim(); const password = networkPass.value;
     if (!apiBase || !username || !password) { setStatus('请填写服务器地址、账号和密码'); return; }
     try {
@@ -685,6 +689,16 @@
         if (!response.ok) { const d = await response.json().catch(() => ({})); throw new Error(d.error || '上传失败'); } success += 1;
       }
       setStatus(`已上传 ${success} 个条目到创意工坊`);
+    } catch (error) { setStatus(`上传失败：${error.message}`); }
+  }
+
+  async function uploadSelectedEntry() {
+    if (!selectedEntry || !networkSession?.token) { setStatus('请先在账户信息中登录'); return; }
+    try {
+      const response = await fetch(`${networkSession.api}/api/worldbook/workshop`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...networkHeaders() }, body: JSON.stringify({ id: `tavern-${currentWorldBookName}-${selectedEntry.uid}`, worldbookName: currentWorldBookName, uid: String(selectedEntry.uid), name: selectedEntry.name || '', category: getCategory(selectedEntry), content: selectedEntry.content || '', strategy: selectedEntry.strategy || {}, position: selectedEntry.position || {}, enabled: selectedEntry.enabled !== false }) });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || '上传失败');
+      setStatus(`已上传条目：${selectedEntry.name}`);
     } catch (error) { setStatus(`上传失败：${error.message}`); }
   }
   async function networkLoadWorkshop() {
@@ -971,6 +985,7 @@
   root.querySelector('.th-arcadia-mode-edit').addEventListener('click', () => setEditMode(true));
   root.querySelector('.th-arcadia-save').addEventListener('click', saveEntry);
   deleteButton.addEventListener('click', deleteEntry);
+  uploadEntryButton.addEventListener('click', uploadSelectedEntry);
 
   // 悬浮球拖拽；窗口始终绑定在悬浮球上方。
   let dragging = false;
