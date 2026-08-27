@@ -15,6 +15,7 @@ const MAX_BODY_BYTES = 128 * 1024;
 const allowedOrigins = new Set((process.env.ALLOWED_ORIGINS || '').split(',').map(value => value.trim()).filter(Boolean));
 const trustProxy = process.env.TRUST_PROXY === 'true';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
+const SESSION_SECRET = process.env.SESSION_SECRET || ADMIN_PASSWORD || 'arcadia-item-workshop-session-secret';
 const sessions = new Map();
 const repository = createRepository(openDatabase(path.join(ROOT, 'data', 'workshop.sqlite')));
 const hashPassword = value => crypto.createHash('sha256').update(String(value)).digest('hex');
@@ -115,18 +116,44 @@ function authToken(req) {
   const header = String(req.headers.authorization || '');
   return header.startsWith('Bearer ') ? header.slice(7).trim() : cookieValue(req, 'arcadia_admin');
 }
+function issueSession(user) {
+  const payload = Buffer.from(JSON.stringify({ userId: user.id, expiry: Date.now() + 8 * 60 * 60 * 1000 })).toString('base64url');
+  const signature = crypto.createHmac('sha256', SESSION_SECRET).update(payload).digest('base64url');
+  const token = `${payload}.${signature}`;
+  sessions.set(token, { userId: user.id, role: user.role, expiry: JSON.parse(Buffer.from(payload, 'base64url').toString()).expiry });
+  return token;
+}
+function sessionForToken(token) {
+  if (!token) return null;
+  const cached = sessions.get(token);
+  if (cached) return cached.expiry > Date.now() ? cached : (sessions.delete(token), null);
+  const [payload, signature] = String(token).split('.');
+  if (!payload || !signature) return null;
+  const expected = crypto.createHmac('sha256', SESSION_SECRET).update(payload).digest('base64url');
+  if (signature.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) return null;
+  try {
+    const data = JSON.parse(Buffer.from(payload, 'base64url').toString());
+    if (!data.userId || !Number.isFinite(data.expiry) || data.expiry <= Date.now()) return null;
+    const user = repository.getUser(data.userId);
+    if (!user) return null;
+    const session = { userId: user.id, role: user.role, expiry: data.expiry };
+    sessions.set(token, session);
+    return session;
+  } catch (_) { return null; }
+}
 function isAdmin(req) {
   const token = authToken(req);
-  const session = sessions.get(token);
-  if (!session || session.expiry < Date.now()) { sessions.delete(token); return false; }
-  return session.role === 'admin';
+  const session = sessionForToken(token);
+  if (!session) return false;
+  const user = repository.getUser(session.userId);
+  return user?.role === 'admin';
 }
 function requireAdmin(req, res) {
   if (!ADMIN_PASSWORD) { send(req, res, 503, { error: '服务端尚未设置 ADMIN_PASSWORD' }); return false; }
   if (!isAdmin(req)) { send(req, res, 401, { error: '需要管理员登录' }); return false; }
   return true;
 }
-function currentUser(req) { const token = authToken(req); const session = sessions.get(token); return session && session.expiry > Date.now() ? repository.getUser(session.userId) : null; }
+function currentUser(req) { const session = sessionForToken(authToken(req)); return session ? repository.getUser(session.userId) : null; }
 function requireUser(req, res) { const user = currentUser(req); if (!user) { send(req, res, 401, { error: '需要登录' }); return null; } return user; }
 function isAdminUser(user) { return user?.role === 'admin'; }
 function sendFile(res, filename, contentType) {
@@ -150,7 +177,7 @@ const server = http.createServer(async (req, res) => {
       const account = repository.findUser(username);
       if (!account || hashPassword(body.password) !== account.password_hash) return send(req, res, 401, { error: '账号或密码错误' });
       if (account.role !== 'admin') return send(req, res, 403, { error: '该账号不是管理员' });
-      const token = crypto.randomBytes(32).toString('hex'); sessions.set(token, { userId: account.id, role: account.role, expiry: Date.now() + 8 * 60 * 60 * 1000 });
+      const token = issueSession(account);
       return send(req, res, 200, { ok: true, token, user: repository.getUser(account.id) }, { 'Set-Cookie': `arcadia_admin=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=28800` });
     }
     if (req.method === 'POST' && url.pathname === '/api/auth/register') {
@@ -163,7 +190,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && url.pathname === '/api/auth/login') {
       const body = await readBody(req); const account = repository.findUser(String(body.username || '').trim());
       if (!account || hashPassword(body.password) !== account.password_hash) return send(req, res, 401, { error: '账号或密码错误' });
-      const token = crypto.randomBytes(32).toString('hex'); sessions.set(token, { userId: account.id, role: account.role, expiry: Date.now() + 8 * 60 * 60 * 1000 });
+      const token = issueSession(account);
       return send(req, res, 200, { token, user: repository.getUser(account.id) }, { 'Set-Cookie': `arcadia_admin=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=28800` });
     }
     if (req.method === 'GET' && url.pathname === '/api/auth/me') {
