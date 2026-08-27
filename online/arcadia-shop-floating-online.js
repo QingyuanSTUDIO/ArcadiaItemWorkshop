@@ -269,6 +269,14 @@
     #${ROOT_ID} .th-arcadia-network-auth-row button, #${ROOT_ID} .th-arcadia-network-actions button { border: 0; border-radius: 4px; padding: 7px 9px; background: #e89424; color: #fff; cursor: pointer; }
     #${ROOT_ID} .th-arcadia-network-items { display: grid; gap: 5px; margin-top: 8px; }
     #${ROOT_ID} .th-arcadia-network-item { border: 1px solid #ffffff2a; border-radius: 4px; padding: 7px 9px; background: #111; color: #fff; cursor: pointer; text-align: left; }
+    #${ROOT_ID} .th-arcadia-network-panel input,
+    #${ROOT_ID} .th-arcadia-network-panel textarea,
+    #${ROOT_ID} .th-arcadia-network-panel select {
+      box-sizing: border-box; width: 100%; border: 1px solid #ffffff2a; border-radius: 4px;
+      padding: 7px; background: #111 !important; color: #fff !important; font: inherit; color-scheme: dark;
+    }
+    #${ROOT_ID} .th-arcadia-network-panel input::placeholder { color: #aaa; opacity: 1; }
+    #${ROOT_ID} .th-arcadia-network-user-state { margin: 8px 0; color: #ddd; font-size: 12px; }
     #${ROOT_ID} .th-arcadia-model-row { display: flex; gap: 6px; margin-bottom: 9px; }
     #${ROOT_ID} .th-arcadia-model-row select { min-width: 0; flex: 1; }
     #${ROOT_ID} .th-arcadia-model-row button, #${ROOT_ID} .th-arcadia-settings-save,
@@ -666,7 +674,7 @@
       networkSession = { token: d.token, username: d.user.username, role: d.user.role, api: apiBase };
       localStorage.setItem('th-arcadia-workshop-api', apiBase); localStorage.setItem('th-arcadia-network-session', JSON.stringify(networkSession));
       updateNetworkState(); setStatus('联网登录成功');
-    } catch (error) { setStatus(`联网失败：${error.message}`); }
+    } catch (error) { networkState.textContent = `操作失败：${error.message}`; setStatus(`联网失败：${error.message}`); }
   }
   async function networkUpload() {
     if (!entries.length || !networkSession?.token) { setStatus('请先登录并确保已有世界书条目'); return; }
