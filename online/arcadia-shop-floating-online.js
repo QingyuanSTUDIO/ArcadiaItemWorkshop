@@ -329,11 +329,13 @@
     #${ROOT_ID} .th-arcadia-entry-status-dot { display: inline-block; flex: 0 0 auto; width: 8px; height: 8px; border-radius: 50%; box-shadow: 0 0 0 1px #0008; }
     #${ROOT_ID} .th-arcadia-entry-status-workshop-downloaded { background: #4d8dff; }
     #${ROOT_ID} .th-arcadia-entry-status-workshop-missing { background: #e05252; }
+    #${ROOT_ID} .th-arcadia-entry-status-workshop-updated { background: #e5b84b; }
     #${ROOT_ID} .th-arcadia-entry-status-mainline-updated { background: #45c878; }
     #${ROOT_ID} .th-arcadia-entry-status-mainline-stale { background: #e5b84b; }
     #${ROOT_ID} .th-arcadia-network-download, #${ROOT_ID} .th-arcadia-network-like, #${ROOT_ID} .th-arcadia-network-report { border: 0; border-radius: 4px; padding: 6px 10px; color: #fff; cursor: pointer; }
     #${ROOT_ID} .th-arcadia-network-download:hover { background: #3bbd7d; }
     #${ROOT_ID} .th-arcadia-network-download { background: #2f9e68; }
+    #${ROOT_ID} .th-arcadia-network-update { background: #d9a441; color: #171717; }
     #${ROOT_ID} .th-arcadia-network-like { background: #2f9e68; }
     #${ROOT_ID} .th-arcadia-network-like:hover { background: #3bbd7d; }
     #${ROOT_ID} .th-arcadia-network-report { background: #c94343; }
@@ -450,6 +452,7 @@
   const aiTopP = root.querySelector('.th-arcadia-ai-top-p');
   const modelButton = root.querySelector('.th-arcadia-models');
   const networkButton = root.querySelector('.th-arcadia-network');
+  const refreshButton = root.querySelector('.th-arcadia-refresh');
   const networkPanel = root.querySelector('.th-arcadia-network-panel');
   const networkUser = root.querySelector('.th-arcadia-network-user');
   const networkPass = root.querySelector('.th-arcadia-network-pass');
@@ -471,6 +474,7 @@
   const workshopSearch = root.querySelector('.th-arcadia-workshop-search');
   const uploadMainlineButton = root.querySelector('.th-arcadia-upload-mainline');
   let uploadInProgress = false;
+  let refreshingAll = false;
   let workshopOffset = 0;
   let mainlineOffset = 0;
   let networkSession = null;
@@ -567,7 +571,13 @@
   function sourceKey(name) { return String(name || '').trim().toLocaleLowerCase(); }
   function contentFingerprint(content) { return String(content || '').replace(/\s+/g, ' ').trim(); }
   function localEntriesWithName(name) { const key = sourceKey(name); return allWorldbookEntries.filter(entry => sourceKey(entry.name) === key); }
-  function workshopStatus(item) { return localEntriesWithName(item.name).length ? ['workshop-downloaded', '已下载'] : ['workshop-missing', '未下载']; }
+  function workshopStatus(item) {
+    const locals = localEntriesWithName(item.name);
+    if (!locals.length) return ['workshop-missing', '未下载'];
+    return locals.some(entry => contentFingerprint(entry.content) === contentFingerprint(item.content))
+      ? ['workshop-downloaded', '已下载']
+      : ['workshop-updated', '待更新'];
+  }
   function mainlineStatus(item) {
     const locals = localEntriesWithName(item.name);
     return locals.some(entry => contentFingerprint(entry.content) === contentFingerprint(item.content)) ? ['mainline-updated', '已更新'] : ['mainline-stale', '未更新或内容有差异'];
@@ -873,17 +883,23 @@
     }).filter(Boolean);
     return sections.length ? sections.join('') : `<div class="th-arcadia-network-item-body">${escapeHtml(raw || '(此条目没有内容)')}</div>`;
   }
-  async function downloadWorkshopItem(item) {
+  async function downloadWorkshopItem(item, update = false) {
     if (!currentWorldBookName || !parentWindow.TavernHelper?.createWorldbookEntries) { setStatus('当前环境不支持写入世界书'); return; }
     const localName = String(item.name || '').trim();
     if (!localName) { setStatus('该创意工坊条目没有名称，无法下载'); return; }
-    const localExists = allWorldbookEntries.some(entry => String(entry.name || '').trim() === localName);
-    if (localExists) { setStatus(`本地已有同名条目，无法下载：${localName}`); return; }
+    const localEntry = localEntriesWithName(localName)[0];
+    if (localEntry && !update) { setStatus(`本地已有同名条目，无法下载：${localName}`); return; }
     try {
-      await parentWindow.TavernHelper.createWorldbookEntries(currentWorldBookName, [{ name: localName, content: item.content || '', strategy: item.strategy || { type: 'selective', keys: [] }, position: item.position || { type: 'after_character_definition', order: 100 }, enabled: item.enabled !== false }]);
+      if (localEntry && update && parentWindow.TavernHelper.updateWorldbookWith) {
+        await parentWindow.TavernHelper.updateWorldbookWith(currentWorldBookName, worldbook => worldbook.map(entry => entry.uid === localEntry.uid
+          ? { ...entry, content: item.content || '', strategy: item.strategy || { type: 'selective', keys: [] }, position: item.position || { type: 'after_character_definition', order: 100 }, enabled: item.enabled !== false }
+          : entry));
+      } else {
+        await parentWindow.TavernHelper.createWorldbookEntries(currentWorldBookName, [{ name: localName, content: item.content || '', strategy: item.strategy || { type: 'selective', keys: [] }, position: item.position || { type: 'after_character_definition', order: 100 }, enabled: item.enabled !== false }]);
+      }
       fetch(`${networkSession.api}/api/worldbook/workshop/${encodeURIComponent(item.id)}/download`, { method: 'POST', headers: networkHeaders() }).catch(() => {});
       await loadEntries();
-      setStatus(`已下载：${localName}`);
+      setStatus(update ? `已更新：${localName}` : `已下载：${localName}`);
     } catch (error) { setStatus(`下载失败：${error.message}`); }
   }
   async function networkAuth(register) {
@@ -902,9 +918,16 @@
       updateNetworkState(); setStatus('联网登录成功');
     } catch (error) { networkState.textContent = `操作失败：${error.message}`; setStatus(`联网失败：${error.message}`); }
   }
+  function confirmUpload(entry, target) {
+    const name = String(entry?.name || '未命名条目').trim();
+    return parentWindow.confirm(`条目名称：${name}\n\n您确定要上传这条世界书条目到${target}吗？\n\n此操作会覆盖该上传者在目标区域中的同名版本。`);
+  }
   async function uploadSelectedEntry() {
     const entry = selectedEntry;
     if (!entry || !networkSession?.token) { setStatus('请先在账户信息中登录'); return; }
+    const mainlineMatch = (sourceIndex.get(sourceKey(entry.name)) || []).some(item => item.module === 'worldbook');
+    if (mainlineMatch) { setStatus(`上传取消：创意工坊不允许使用与主世界书相同的条目名称：${entry.name}`); return; }
+    if (!confirmUpload(entry, '创意工坊')) return;
     if (uploadInProgress) return;
     uploadInProgress = true;
     try {
@@ -917,6 +940,7 @@
   }
   async function uploadMainlineEntry() {
     if (!selectedEntry || networkSession?.role !== 'admin') { setStatus('仅管理员可以上传至主线世界书'); return; }
+    if (!confirmUpload(selectedEntry, '主线（管理员）')) return;
     if (uploadInProgress) return;
     uploadInProgress = true;
     try {
@@ -932,10 +956,10 @@
     try {
       const params = new URLSearchParams({ category: workshopCategory.value, sort: workshopSort.value, q: workshopSearch.value.trim(), offset: String(workshopOffset) });
       const r = await fetch(`${networkSession.api}/api/worldbook/workshop?${params}`, { headers: networkHeaders() }); const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(networkError(d, '读取失败'));
-      networkItems.innerHTML = d.items?.length ? d.items.map((item, index) => { const [state, title] = workshopStatus(item); return `<details class="th-arcadia-network-item" data-index="${index}"><summary><span class="th-arcadia-entry-status-dot th-arcadia-entry-status-${state}" title="${title}"></span><span class="th-arcadia-network-item-title">${escapeHtml(item.name || '未命名条目')}</span><span class="th-arcadia-network-item-author">上传者：${escapeHtml(item.authorName || '未知')}</span><span class="th-arcadia-network-item-stats">下载 ${item.downloadCount || 0} · 赞 ${item.likeCount || 0} · 举报 ${item.reportCount || 0}</span><button type="button" class="th-arcadia-network-collapse-item">折叠本栏目</button><span class="th-arcadia-network-item-actions"><button type="button" class="th-arcadia-network-download">下载</button><button type="button" class="th-arcadia-network-like">赞</button><button type="button" class="th-arcadia-network-report">踩</button></span></summary><div class="th-arcadia-network-item-body"><div class="th-arcadia-workshop-sections">${workshopTaggedSections(item.content)}</div></div></details>`; }).join('') : '<div class="th-arcadia-settings-hint">没有符合条件的条目</div>';
+      networkItems.innerHTML = d.items?.length ? d.items.map((item, index) => { const [state, title] = workshopStatus(item); const needsUpdate = state === 'workshop-updated'; return `<details class="th-arcadia-network-item" data-index="${index}"><summary><span class="th-arcadia-entry-status-dot th-arcadia-entry-status-${state}" title="${title}"></span><span class="th-arcadia-network-item-title">${escapeHtml(item.name || '未命名条目')}</span><span class="th-arcadia-network-item-author">上传者：${escapeHtml(item.authorName || '未知')}</span><span class="th-arcadia-network-item-stats">下载 ${item.downloadCount || 0} · 赞 ${item.likeCount || 0} · 举报 ${item.reportCount || 0}</span><button type="button" class="th-arcadia-network-collapse-item">折叠本栏目</button><span class="th-arcadia-network-item-actions"><button type="button" class="th-arcadia-network-download${needsUpdate ? ' th-arcadia-network-update' : ''}">${needsUpdate ? '更新' : '下载'}</button><button type="button" class="th-arcadia-network-like">赞</button><button type="button" class="th-arcadia-network-report">踩</button></span></summary><div class="th-arcadia-network-item-body"><div class="th-arcadia-workshop-sections">${workshopTaggedSections(item.content)}</div></div></details>`; }).join('') : '<div class="th-arcadia-settings-hint">没有符合条件的条目</div>';
       networkItems.querySelectorAll('.th-arcadia-workshop-section').forEach(section => { section.open = false; });
       networkItems.querySelectorAll('.th-arcadia-network-collapse-item').forEach(button => button.addEventListener('click', event => { event.preventDefault(); event.stopPropagation(); button.closest('.th-arcadia-network-item')?.querySelectorAll('.th-arcadia-workshop-section').forEach(section => { section.open = false; }); }));
-      networkItems.querySelectorAll('.th-arcadia-network-download').forEach(button => button.addEventListener('click', event => { event.preventDefault(); event.stopPropagation(); downloadWorkshopItem(d.items[Number(button.closest('.th-arcadia-network-item')?.dataset.index)]); }));
+      networkItems.querySelectorAll('.th-arcadia-network-download').forEach(button => button.addEventListener('click', event => { event.preventDefault(); event.stopPropagation(); downloadWorkshopItem(d.items[Number(button.closest('.th-arcadia-network-item')?.dataset.index)], button.classList.contains('th-arcadia-network-update')); }));
       networkItems.querySelectorAll('.th-arcadia-network-like, .th-arcadia-network-report').forEach(button => button.addEventListener('click', async event => { event.preventDefault(); event.stopPropagation(); const item = d.items[Number(button.closest('.th-arcadia-network-item')?.dataset.index)]; const action = button.classList.contains('th-arcadia-network-like') ? 'like' : 'report'; try { const response = await fetch(`${networkSession.api}/api/worldbook/workshop/${encodeURIComponent(item.id)}/${action}`, { method: 'POST', headers: networkHeaders() }); const data = await response.json().catch(() => ({})); if (!response.ok) throw new Error(networkError(data, '操作失败')); button.disabled = true; setStatus(action === 'like' ? `已点赞：${item.name}` : `已举报：${item.name}`); } catch (error) { setStatus(error.message); } }));
       renderPager(workshopPager, d.total || 0, workshopOffset, offset => { workshopOffset = offset; networkLoadWorkshop(); });
       setStatus(`已读取 ${d.items?.length || 0} 个创意工坊条目`);
@@ -956,6 +980,7 @@
   }
   async function updateMainlineWorldbook() {
     if (networkSession?.role !== 'admin' || !entries.length) { setStatus('仅管理员可以更新世界书本体'); return; }
+    if (!parentWindow.confirm(`您确定要更新主线世界书中的全部 ${entries.length} 个条目吗？`)) return;
     try {
       let success = 0;
       for (const entry of entries) {
@@ -966,6 +991,27 @@
       await networkLoadMainline();
       setStatus(`已更新 ${success} 个世界书本体条目`);
     } catch (error) { setStatus(`更新世界书本体失败：${error.message}`); }
+  }
+
+  async function refreshAll() {
+    if (refreshingAll) return;
+    refreshingAll = true;
+    refreshButton.disabled = true;
+    try {
+      // 先重新读取本地世界书，再同步服务端索引和当前两个联网列表，
+      // 这样主页面、创意工坊、世界书本体的状态点会一次性更新。
+      await loadEntries();
+      if (networkSession?.token) {
+        await refreshSourceIndex();
+        await Promise.all([networkLoadWorkshop(), networkLoadMainline()]);
+      }
+      setStatus(networkSession?.token ? '已刷新本地世界书及全部联网状态' : '已刷新本地世界书（登录后可同步联网状态）');
+    } catch (error) {
+      setStatus(`刷新失败：${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      refreshingAll = false;
+      refreshButton.disabled = false;
+    }
   }
 
   function openPanel() {
@@ -1216,7 +1262,7 @@
     sections.querySelectorAll('details').forEach(section => { section.open = false; });
   });
   root.querySelector('.th-arcadia-close').addEventListener('click', () => { panel.hidden = true; });
-  root.querySelector('.th-arcadia-refresh').addEventListener('click', loadEntries);
+  refreshButton.addEventListener('click', refreshAll);
   settingsButton.addEventListener('click', () => showSettings(settingsPanel.hidden));
   settingsBackHeader.addEventListener('click', event => { event.preventDefault(); event.stopPropagation(); showSettings(false); });
   settingsSave.addEventListener('click', saveSettings);

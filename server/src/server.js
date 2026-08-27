@@ -308,6 +308,9 @@ const server = http.createServer(async (req, res) => {
         }
         if (!CATEGORIES.includes(body.category || '商品')) throw new ValidationError('category 不是允许的分类');
         const sameName = repository.findWorldbookByName(module, String(body.name || '').trim());
+        if (module === 'workshop' && repository.findWorldbookByName('worldbook', String(body.name || '').trim())) {
+          return send(req, res, 409, { error: `创意工坊条目名称“${body.name}”已存在于主世界书，不允许上传` });
+        }
         if (sameName && sameName.id !== body.id && sameName.authorId !== user.id) return send(req, res, 409, { error: `条目名称“${body.name}”已存在，上传者不同，不允许覆盖` });
         const entryId = sameName && sameName.id !== body.id && sameName.authorId === user.id ? sameName.id : (body.id || crypto.randomUUID());
         const entry = repository.upsertWorldbookEntry({ id: entryId, module, worldbookName: String(body.worldbookName || ''), uid: String(body.uid || sameName?.uid || crypto.randomUUID()), name: String(body.name || '').slice(0, 200), content: String(body.content || '').slice(0, 20000), category: body.category || '商品', strategyJson: JSON.stringify(body.strategy || {}), positionJson: JSON.stringify(body.position || {}), enabled: body.enabled === false ? 0 : 1, authorId: sameName?.authorId === user.id ? user.id : user.id, createdAt: body.createdAt || sameName?.createdAt || now, updatedAt: now });
