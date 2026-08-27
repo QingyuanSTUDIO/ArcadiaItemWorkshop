@@ -73,7 +73,15 @@ export function createRepository(db, reportLimit = 5) {
   const getAny = db.prepare('SELECT * FROM items WHERE id = ?');
   const getUserByUsername = db.prepare('SELECT * FROM users WHERE username = ?');
   const getUserById = db.prepare('SELECT id, username, role, created_at, updated_at FROM users WHERE id = ?');
-  const entryRow = row => ({ id: row.id, module: row.module, worldbookName: row.worldbook_name, uid: row.uid, name: row.name, content: row.content, category: row.category || '商品', strategy: JSON.parse(row.strategy_json), position: JSON.parse(row.position_json), enabled: Boolean(row.enabled), authorId: row.author_id, createdAt: row.created_at, updatedAt: row.updated_at });
+  const parseJsonObject = value => {
+    try {
+      const parsed = JSON.parse(value || '{}');
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch (_) {
+      return {};
+    }
+  };
+  const entryRow = row => ({ id: row.id, module: row.module, worldbookName: row.worldbook_name, uid: row.uid, name: row.name, content: row.content, category: row.category || '商品', strategy: parseJsonObject(row.strategy_json), position: parseJsonObject(row.position_json), enabled: Boolean(row.enabled), authorId: row.author_id, createdAt: row.created_at, updatedAt: row.updated_at });
   const insertReport = db.prepare('INSERT INTO reports (item_id, reporter_hash, reason, created_at) VALUES (?, ?, ?, ?)');
   const updateReportCount = db.prepare(`
     UPDATE items
@@ -115,7 +123,10 @@ export function createRepository(db, reportLimit = 5) {
       return entryRow(db.prepare('SELECT * FROM worldbook_entries WHERE id = ?').get(entry.id) || db.prepare('SELECT * FROM worldbook_entries WHERE module=? AND worldbook_name=? AND uid=?').get(entry.module, entry.worldbookName, entry.uid));
     },
     listWorldbookEntries({ module, worldbookName = '' }) {
-      return db.prepare('SELECT * FROM worldbook_entries WHERE module = ? AND (? = "" OR worldbook_name = ?) ORDER BY CAST(json_extract(position_json, "$.order") AS INTEGER), name').all(module, worldbookName, worldbookName).map(entryRow);
+      // 不依赖 SQLite JSON1 扩展；宝塔环境中的 SQLite 构建可能未启用该扩展。
+      return db.prepare('SELECT * FROM worldbook_entries WHERE module = ? AND (? = "" OR worldbook_name = ?) ORDER BY name').all(module, worldbookName, worldbookName)
+        .map(entryRow)
+        .sort((a, b) => (Number(a.position?.order) || 0) - (Number(b.position?.order) || 0) || a.name.localeCompare(b.name, 'zh-CN'));
     },
     getWorldbookEntry(id) { const row = db.prepare('SELECT * FROM worldbook_entries WHERE id = ?').get(id); return row ? entryRow(row) : null; },
     findWorldbookByName(module, name) { const row = db.prepare('SELECT * FROM worldbook_entries WHERE module = ? AND name = ? LIMIT 1').get(module, name); return row ? entryRow(row) : null; },

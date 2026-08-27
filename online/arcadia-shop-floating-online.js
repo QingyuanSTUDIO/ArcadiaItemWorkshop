@@ -35,6 +35,11 @@
     }
   })();
   const parentDocument = parentWindow.document;
+  // 记录脚本所在 iframe。停用全局脚本时，部分前端只会移除 iframe，
+  // 不会触发 iframe 的 pagehide/unload，因此由宿主文档观察其生命周期。
+  const scriptFrame = (() => {
+    try { return window.frameElement || null; } catch (_) { return null; }
+  })();
   debug('宿主环境已解析', {
     sameWindow: parentWindow === window,
     hasDocument: !!parentDocument,
@@ -93,7 +98,10 @@
             <div class="th-arcadia-editor-sections"></div>
             <button class="th-arcadia-save" type="button">保存到世界书</button>
             <button class="th-arcadia-delete" type="button">删除当前条目</button>
-            <button class="th-arcadia-upload-entry" type="button">上传当前条目到创意工坊</button>
+            <div class="th-arcadia-upload-row">
+              <button class="th-arcadia-upload-entry" type="button">上传当前条目到创意工坊</button>
+              <button class="th-arcadia-upload-mainline" type="button" hidden>上传至主线世界书</button>
+            </div>
           </div>
           <div class="th-arcadia-settings" hidden>
             <details class="th-arcadia-settings-module">
@@ -141,7 +149,12 @@
                 <label class="th-arcadia-editor-field">密码<input class="th-arcadia-network-pass" type="password"></label>
                 <div class="th-arcadia-network-auth-row"><button class="th-arcadia-network-login" type="button">登录</button><button class="th-arcadia-network-register" type="button">注册并登录</button><button class="th-arcadia-network-logout" type="button">退出登录</button></div>
                 <div class="th-arcadia-network-user-state">未登录</div>
-                <div class="th-arcadia-network-actions" hidden><button class="th-arcadia-network-list" type="button">打开创意工坊</button></div>
+              </div>
+            </details>
+            <details class="th-arcadia-settings-module th-arcadia-workshop-module">
+              <summary>创意工坊</summary>
+              <div class="th-arcadia-settings-module-body">
+                <div class="th-arcadia-network-actions" hidden><button class="th-arcadia-network-list" type="button">读取创意工坊</button></div>
                 <div class="th-arcadia-network-items"></div>
               </div>
             </details>
@@ -286,6 +299,12 @@
     #${ROOT_ID} .th-arcadia-prompt-save { margin-top: 8px; }
     #${ROOT_ID} .th-arcadia-delete { width: 100%; margin-top: 7px; border: 1px solid #d55; border-radius: 4px; padding: 8px; background: transparent; color: #f88; cursor: pointer; }
     #${ROOT_ID} .th-arcadia-delete:hover { background: #d522; }
+    #${ROOT_ID} .th-arcadia-upload-row { display: flex; gap: 7px; width: 100%; margin-top: 7px; }
+    #${ROOT_ID} .th-arcadia-upload-entry, #${ROOT_ID} .th-arcadia-upload-mainline { flex: 1 1 0; min-width: 0; height: 38px; margin: 0; border: 0; border-radius: 4px; padding: 8px 7px; color: #fff; cursor: pointer; white-space: nowrap; }
+    #${ROOT_ID} .th-arcadia-upload-entry { background: #2f9e68; }
+    #${ROOT_ID} .th-arcadia-upload-entry:hover { background: #3bbd7d; }
+    #${ROOT_ID} .th-arcadia-upload-mainline { background: #c94343; }
+    #${ROOT_ID} .th-arcadia-upload-mainline:hover { background: #e05757; }
     @media (max-width: 520px) {
       #${ROOT_ID} .th-arcadia-body { grid-template-columns: 115px minmax(0, 1fr); }
     }
@@ -359,6 +378,7 @@
   const networkState = root.querySelector('.th-arcadia-network-user-state');
   const networkActions = root.querySelector('.th-arcadia-network-actions');
   const networkItems = root.querySelector('.th-arcadia-network-items');
+  const uploadMainlineButton = root.querySelector('.th-arcadia-upload-mainline');
   let networkSession = null;
   try { networkSession = JSON.parse(localStorage.getItem('th-arcadia-network-session') || 'null'); } catch (_) {}
   networkUser.value = networkSession?.username || '';
@@ -656,6 +676,7 @@
     const loggedIn = Boolean(networkSession?.token);
     networkState.textContent = loggedIn ? `已登录：${networkSession.username}（${networkSession.role === 'admin' ? '管理员' : '用户'}）` : '未登录';
     networkActions.hidden = !loggedIn;
+    uploadMainlineButton.hidden = !loggedIn || networkSession.role !== 'admin';
     networkUser.hidden = loggedIn;
     networkPass.hidden = loggedIn;
     root.querySelector('.th-arcadia-network-login').hidden = loggedIn;
@@ -700,6 +721,15 @@
       if (!response.ok) throw new Error(data.error || '上传失败');
       setStatus(`已上传条目：${selectedEntry.name}`);
     } catch (error) { setStatus(`上传失败：${error.message}`); }
+  }
+  async function uploadMainlineEntry() {
+    if (!selectedEntry || networkSession?.role !== 'admin') { setStatus('仅管理员可以上传至主线世界书'); return; }
+    try {
+      const response = await fetch(`${networkSession.api}/api/worldbook`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...networkHeaders() }, body: JSON.stringify({ id: `tavern-${currentWorldBookName}-${selectedEntry.uid}`, worldbookName: currentWorldBookName, uid: String(selectedEntry.uid), name: selectedEntry.name || '', category: getCategory(selectedEntry), content: selectedEntry.content || '', strategy: selectedEntry.strategy || {}, position: selectedEntry.position || {}, enabled: selectedEntry.enabled !== false }) });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || '上传失败');
+      setStatus(`已上传主线条目：${selectedEntry.name}`);
+    } catch (error) { setStatus(`主线上传失败：${error.message}`); }
   }
   async function networkLoadWorkshop() {
     if (!networkSession?.token) return;
@@ -978,7 +1008,8 @@
   root.querySelector('.th-arcadia-network-login').addEventListener('click', () => networkAuth(false));
   root.querySelector('.th-arcadia-network-register').addEventListener('click', () => networkAuth(true));
   root.querySelector('.th-arcadia-network-logout').addEventListener('click', () => { networkSession = null; localStorage.removeItem('th-arcadia-network-session'); updateNetworkState(); setStatus('已退出联网账号'); });
-  root.querySelector('.th-arcadia-network-upload').addEventListener('click', networkUpload);
+  // 上传世界书已移入编辑模式；联网页不再渲染旧的上传按钮。
+  // 不要因为可选控件缺失而中断后续的悬浮球定位和拖拽初始化。
   root.querySelector('.th-arcadia-network-list').addEventListener('click', networkLoadWorkshop);
   aiWriteButton.addEventListener('click', aiWrite);
   root.querySelector('.th-arcadia-mode-run').addEventListener('click', () => setEditMode(false));
@@ -986,6 +1017,7 @@
   root.querySelector('.th-arcadia-save').addEventListener('click', saveEntry);
   deleteButton.addEventListener('click', deleteEntry);
   uploadEntryButton.addEventListener('click', uploadSelectedEntry);
+  root.querySelector('.th-arcadia-upload-mainline').addEventListener('click', uploadMainlineEntry);
 
   // 悬浮球拖拽；窗口始终绑定在悬浮球上方。
   let dragging = false;
@@ -1107,16 +1139,31 @@
   }
 
   const cleanup = () => {
+    if (cleanup.done) return;
+    cleanup.done = true;
     cleanupController.abort();
     root.remove();
     style.remove();
+    if (parentWindow.__TH_ARCADIA_CLEANUP__ === cleanup) {
+      try { delete parentWindow.__TH_ARCADIA_CLEANUP__; } catch (_) { parentWindow.__TH_ARCADIA_CLEANUP__ = null; }
+    }
   };
+  cleanup.done = false;
   parentWindow.__TH_ARCADIA_CLEANUP__ = cleanup;
   parentWindow.addEventListener('pagehide', cleanup, { once: true });
   // 停用全局脚本时，酒馆助手通常会卸载脚本 iframe，但不一定刷新宿主页面。
   // 监听当前 iframe 的生命周期，及时移除挂载到宿主文档的悬浮窗。
   window.addEventListener('pagehide', cleanup, { once: true });
   window.addEventListener('beforeunload', cleanup, { once: true });
+  if (scriptFrame) {
+    try {
+      const frameObserver = new MutationObserver(() => {
+        if (!scriptFrame.isConnected) cleanup();
+      });
+      frameObserver.observe(parentDocument.documentElement, { childList: true, subtree: true });
+      cleanupController.signal.addEventListener('abort', () => frameObserver.disconnect(), { once: true });
+    } catch (_) {}
+  }
   debug('脚本初始化完成', {
     orb: !!orb,
     panel: !!panel,
