@@ -233,11 +233,12 @@ const server = http.createServer(async (req, res) => {
       }
       if (req.method === 'GET' && url.pathname === '/api/admin/users') return send(req, res, 200, { users: repository.listUsers() });
       if (req.method === 'GET' && url.pathname === '/api/admin/worldbook') {
-        const module = url.searchParams.get('module') === 'workshop' ? 'workshop' : 'worldbook';
+        const requestedModule = url.searchParams.get('module');
+        const module = requestedModule === 'workshop' || requestedModule === 'review' ? requestedModule : 'worldbook';
         return send(req, res, 200, { items: repository.listWorldbookEntries({ module, worldbookName: url.searchParams.get('worldbook') || '' }) });
       }
       if (req.method === 'POST' && url.pathname === '/api/admin/worldbook') {
-        const body = await readBody(req); const module = body.module === 'workshop' ? 'workshop' : 'worldbook'; const now = new Date().toISOString();
+        const body = await readBody(req); const requestedModule = body.module; const module = requestedModule === 'workshop' || requestedModule === 'review' ? 'workshop' : 'worldbook'; const now = new Date().toISOString();
         const existing = body.id ? repository.getWorldbookEntry(String(body.id)) : null;
         if (!CATEGORIES.includes(body.category || '商品')) throw new ValidationError('category 不是允许的分类');
         const sameName = repository.findWorldbookByName(module, String(body.name || '').trim());

@@ -19,6 +19,7 @@ export function openDatabase(filename) {
       entry_json TEXT NOT NULL,
       item_order INTEGER NOT NULL DEFAULT 0,
       report_count INTEGER NOT NULL DEFAULT 0,
+      moderation_status TEXT NOT NULL DEFAULT 'published' CHECK(moderation_status IN ('published', 'review')),
       status TEXT NOT NULL DEFAULT 'published' CHECK(status IN ('published', 'hidden', 'deleted')),
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
@@ -74,6 +75,7 @@ export function openDatabase(filename) {
   for (const column of ['download_count', 'like_count', 'report_count']) {
     try { db.exec(`ALTER TABLE worldbook_entries ADD COLUMN ${column} INTEGER NOT NULL DEFAULT 0`); } catch (error) { if (!String(error.message).includes('duplicate column')) throw error; }
   }
+  try { db.exec("ALTER TABLE worldbook_entries ADD COLUMN moderation_status TEXT NOT NULL DEFAULT 'published'"); } catch (error) { if (!String(error.message).includes('duplicate column')) throw error; }
   return db;
 }
 
@@ -94,7 +96,7 @@ export function createRepository(db, reportLimit = 5) {
       return {};
     }
   };
-  const entryRow = row => ({ id: row.id, module: row.module, worldbookName: row.worldbook_name, uid: row.uid, name: row.name, content: row.content, category: row.category || '商品', strategy: parseJsonObject(row.strategy_json), position: parseJsonObject(row.position_json), enabled: Boolean(row.enabled), authorId: row.author_id, authorName: row.author_name || '', downloadCount: Number(row.download_count) || 0, likeCount: Number(row.like_count) || 0, reportCount: Number(row.report_count) || 0, createdAt: row.created_at, updatedAt: row.updated_at });
+  const entryRow = row => ({ id: row.id, module: row.module, worldbookName: row.worldbook_name, uid: row.uid, name: row.name, content: row.content, category: row.category || '商品', strategy: parseJsonObject(row.strategy_json), position: parseJsonObject(row.position_json), enabled: Boolean(row.enabled), authorId: row.author_id, authorName: row.author_name || '', downloadCount: Number(row.download_count) || 0, likeCount: Number(row.like_count) || 0, reportCount: Number(row.report_count) || 0, moderationStatus: row.moderation_status || 'published', createdAt: row.created_at, updatedAt: row.updated_at });
   const insertReport = db.prepare('INSERT INTO reports (item_id, reporter_hash, reason, created_at) VALUES (?, ?, ?, ?)');
   const updateReportCount = db.prepare(`
     UPDATE items
@@ -137,13 +139,15 @@ export function createRepository(db, reportLimit = 5) {
     },
     listWorldbookEntries({ module, worldbookName = '', category = '', query = '', sort = 'newest' }) {
       // 不依赖 SQLite JSON1 扩展；宝塔环境中的 SQLite 构建可能未启用该扩展。
-      const rows = db.prepare("SELECT e.*, u.username AS author_name FROM worldbook_entries e LEFT JOIN users u ON u.id=e.author_id WHERE e.module = ? AND (? = '' OR e.worldbook_name = ?) AND (? = '' OR e.category = ?) AND (? = '' OR e.name LIKE ? OR COALESCE(u.username, '') LIKE ?) ORDER BY e.updated_at DESC").all(module, worldbookName, worldbookName, category, category, query, `%${query}%`, `%${query}%`).map(entryRow);
+      const actualModule = module === 'review' ? 'workshop' : module;
+      const moderation = module === 'review' ? 'review' : 'published';
+      const rows = db.prepare("SELECT e.*, u.username AS author_name FROM worldbook_entries e LEFT JOIN users u ON u.id=e.author_id WHERE e.module = ? AND e.moderation_status = ? AND (? = '' OR e.worldbook_name = ?) AND (? = '' OR e.category = ?) AND (? = '' OR e.name LIKE ? OR COALESCE(u.username, '') LIKE ?) ORDER BY e.updated_at DESC").all(actualModule, moderation, worldbookName, worldbookName, category, category, query, `%${query}%`, `%${query}%`).map(entryRow);
       const compare = sort === 'oldest' ? (a, b) => a.createdAt.localeCompare(b.createdAt) : sort === 'downloads_desc' ? (a, b) => b.downloadCount - a.downloadCount : sort === 'downloads_asc' ? (a, b) => a.downloadCount - b.downloadCount : sort === 'likes_desc' ? (a, b) => b.likeCount - a.likeCount : sort === 'likes_asc' ? (a, b) => a.likeCount - b.likeCount : (a, b) => b.createdAt.localeCompare(a.createdAt);
       return rows.sort(compare);
     },
     incrementWorldbookDownload(id) { db.prepare('UPDATE worldbook_entries SET download_count = download_count + 1, updated_at = updated_at WHERE id = ?').run(id); return this.getWorldbookEntry(id); },
     incrementWorldbookLike(id) { db.prepare('UPDATE worldbook_entries SET like_count = like_count + 1 WHERE id = ?').run(id); return this.getWorldbookEntry(id); },
-    incrementWorldbookReport(id) { db.prepare('UPDATE worldbook_entries SET report_count = report_count + 1 WHERE id = ?').run(id); return this.getWorldbookEntry(id); },
+    incrementWorldbookReport(id) { db.prepare("UPDATE worldbook_entries SET report_count = report_count + 1, moderation_status = CASE WHEN report_count + 1 >= 10 THEN 'review' ELSE moderation_status END WHERE id = ?").run(id); return this.getWorldbookEntry(id); },
     reactWorldbook(id, userId, reaction) {
       const now = new Date().toISOString();
       try {
@@ -153,7 +157,10 @@ export function createRepository(db, reportLimit = 5) {
         throw error;
       }
       const column = reaction === 'like' ? 'like_count' : 'report_count';
-      db.prepare(`UPDATE worldbook_entries SET ${column} = ${column} + 1 WHERE id = ?`).run(id);
+      const update = reaction === 'report'
+        ? 'UPDATE worldbook_entries SET report_count = report_count + 1, moderation_status = CASE WHEN report_count + 1 >= 10 THEN \'review\' ELSE moderation_status END WHERE id = ?'
+        : 'UPDATE worldbook_entries SET like_count = like_count + 1 WHERE id = ?';
+      db.prepare(update).run(id);
       return { kind: 'accepted', item: this.getWorldbookEntry(id) };
     },
     listWorldbookReactions(id) {
