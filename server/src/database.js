@@ -43,6 +43,7 @@ export function createRepository(db, reportLimit = 5) {
     VALUES (@id, @name, @category, @formatVersion, @author, @tagsJson, @entryJson, @itemOrder, @createdAt, @updatedAt)
   `);
   const getPublic = db.prepare("SELECT * FROM items WHERE id = ? AND status = 'published'");
+  const getAny = db.prepare('SELECT * FROM items WHERE id = ?');
   const insertReport = db.prepare('INSERT INTO reports (item_id, reporter_hash, reason, created_at) VALUES (?, ?, ?, ?)');
   const updateReportCount = db.prepare(`
     UPDATE items
@@ -73,6 +74,39 @@ export function createRepository(db, reportLimit = 5) {
     get(id) {
       const row = getPublic.get(id);
       return row ? mapItem(row) : null;
+    },
+    adminList({ query = '', status = '', limit = 100, offset = 0 }) {
+      const rows = db.prepare(`
+        SELECT * FROM items
+        WHERE (@status = '' OR status = @status)
+          AND (@query = '' OR name LIKE @pattern OR author LIKE @pattern OR tags_json LIKE @pattern)
+        ORDER BY updated_at DESC, item_order, name
+        LIMIT @limit OFFSET @offset
+      `).all({ status, query, pattern: `%${query}%`, limit, offset });
+      return rows.map(mapItem);
+    },
+    adminCount({ query = '', status = '' }) {
+      return db.prepare(`SELECT COUNT(*) AS count FROM items
+        WHERE (@status = '' OR status = @status)
+          AND (@query = '' OR name LIKE @pattern OR author LIKE @pattern OR tags_json LIKE @pattern)`)
+        .get({ status, query, pattern: `%${query}%` }).count;
+    },
+    adminGet(id) {
+      const row = getAny.get(id);
+      if (!row) return null;
+      const reports = db.prepare('SELECT reason, created_at FROM reports WHERE item_id = ? ORDER BY created_at DESC').all(id)
+        .map(report => ({ reason: report.reason, createdAt: report.created_at }));
+      return { ...mapItem(row), reports };
+    },
+    setStatus(id, status) {
+      const result = db.prepare("UPDATE items SET status = ?, updated_at = ? WHERE id = ? AND status != 'deleted'")
+        .run(status, new Date().toISOString(), id);
+      return result.changes ? mapItem(getAny.get(id)) : null;
+    },
+    delete(id) {
+      const result = db.prepare("UPDATE items SET status = 'deleted', updated_at = ? WHERE id = ? AND status != 'deleted'")
+        .run(new Date().toISOString(), id);
+      return result.changes > 0;
     },
     list({ category = '', query = '', limit = 30, offset = 0 }) {
       const rows = db.prepare(`
@@ -110,6 +144,7 @@ function mapItem(row) {
     tags: JSON.parse(row.tags_json),
     entry: JSON.parse(row.entry_json),
     reportCount: row.report_count,
+    status: row.status,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

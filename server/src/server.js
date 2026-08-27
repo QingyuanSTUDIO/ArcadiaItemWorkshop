@@ -1,17 +1,36 @@
 import crypto from 'node:crypto';
 import http from 'node:http';
 import path from 'node:path';
+import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { CATEGORIES, ValidationError, validateItem, validateReport } from './validation.js';
 import { createRepository, openDatabase } from './database.js';
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+loadEnvFile(path.join(ROOT, '.env'));
 const PORT = parseInteger(process.env.PORT, 8787, 1, 65535);
-const HOST = process.env.HOST || '127.0.0.1';
+// 监听所有网卡，便于测试阶段通过服务器公网 IP 访问；正式部署仍建议放在 Nginx/HTTPS 后面。
+const HOST = process.env.HOST || '0.0.0.0';
 const MAX_BODY_BYTES = 128 * 1024;
 const allowedOrigins = new Set((process.env.ALLOWED_ORIGINS || '').split(',').map(value => value.trim()).filter(Boolean));
 const trustProxy = process.env.TRUST_PROXY === 'true';
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
+const sessions = new Map();
 const repository = createRepository(openDatabase(path.join(ROOT, 'data', 'workshop.sqlite')));
+
+function loadEnvFile(filename) {
+  try {
+    const lines = fs.readFileSync(filename, 'utf8').split(/\r?\n/);
+    for (const line of lines) {
+      const match = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/);
+      if (!match || match[1] in process.env) continue;
+      const value = match[2].replace(/^(['"])(.*)\1$/, '$2');
+      process.env[match[1]] = value;
+    }
+  } catch (error) {
+    if (error.code !== 'ENOENT') console.warn('无法读取 .env：', error.message);
+  }
+}
 
 function parseInteger(value, fallback, min, max) {
   const number = Number(value);
@@ -78,11 +97,64 @@ function publicSummary(item) {
   return summary;
 }
 
+function cookieValue(req, name) {
+  const pair = String(req.headers.cookie || '').split(';').map(value => value.trim()).find(value => value.startsWith(`${name}=`));
+  return pair ? decodeURIComponent(pair.slice(name.length + 1)) : '';
+}
+function isAdmin(req) {
+  const token = cookieValue(req, 'arcadia_admin');
+  const expiry = sessions.get(token);
+  if (!expiry || expiry < Date.now()) { sessions.delete(token); return false; }
+  return true;
+}
+function requireAdmin(req, res) {
+  if (!ADMIN_PASSWORD) { send(req, res, 503, { error: '服务端尚未设置 ADMIN_PASSWORD' }); return false; }
+  if (!isAdmin(req)) { send(req, res, 401, { error: '需要管理员登录' }); return false; }
+  return true;
+}
+function sendFile(res, filename, contentType) {
+  try { res.writeHead(200, { 'Content-Type': contentType, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' }); res.end(fs.readFileSync(filename)); }
+  catch { res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }); res.end('Not found'); }
+}
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
   const parts = url.pathname.split('/').filter(Boolean);
   try {
     if (req.method === 'OPTIONS') return send(req, res, 204, null);
+    if (req.method === 'GET' && url.pathname === '/admin') return sendFile(res, path.join(ROOT, 'admin', 'index.html'), 'text/html; charset=utf-8');
+    if (req.method === 'POST' && url.pathname === '/api/admin/login') {
+      const body = await readBody(req);
+      const expected = crypto.createHash('sha256').update(ADMIN_PASSWORD).digest();
+      const actual = crypto.createHash('sha256').update(typeof body.password === 'string' ? body.password : '').digest();
+      if (!ADMIN_PASSWORD || !crypto.timingSafeEqual(actual, expected)) return send(req, res, 401, { error: '管理员密码错误' });
+      const token = crypto.randomBytes(32).toString('hex'); sessions.set(token, Date.now() + 8 * 60 * 60 * 1000);
+      return send(req, res, 200, { ok: true }, { 'Set-Cookie': `arcadia_admin=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800` });
+    }
+    if (req.method === 'POST' && url.pathname === '/api/admin/logout') {
+      sessions.delete(cookieValue(req, 'arcadia_admin'));
+      return send(req, res, 200, { ok: true }, { 'Set-Cookie': 'arcadia_admin=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0' });
+    }
+    if (url.pathname.startsWith('/api/admin/')) {
+      if (!requireAdmin(req, res)) return;
+      if (req.method === 'GET' && parts.length === 4 && parts[0] === 'api' && parts[1] === 'admin' && parts[2] === 'items') {
+        const item = repository.adminGet(parts[3]);
+        return item ? send(req, res, 200, { item }) : send(req, res, 404, { error: '条目不存在' });
+      }
+      if (req.method === 'GET' && url.pathname === '/api/admin/items') {
+        const filter = { query: (url.searchParams.get('q') || '').trim().slice(0, 100), status: url.searchParams.get('status') || '', limit: parseInteger(url.searchParams.get('limit'), 100, 1, 200), offset: parseInteger(url.searchParams.get('offset'), 0, 0, 1_000_000) };
+        return send(req, res, 200, { total: repository.adminCount(filter), items: repository.adminList(filter) });
+      }
+      if (req.method === 'POST' && parts.length === 5 && parts[0] === 'api' && parts[1] === 'admin' && parts[2] === 'items') {
+        const id = parts[3];
+        if (parts[4] === 'delete') return send(req, res, 200, { ok: repository.delete(id) });
+        if (parts[4] === 'status') {
+          const body = await readBody(req); if (!['published', 'hidden'].includes(body.status)) throw new ValidationError('status 不合法');
+          const item = repository.setStatus(id, body.status); return item ? send(req, res, 200, { item }) : send(req, res, 404, { error: '条目不存在' });
+        }
+      }
+      return send(req, res, 404, { error: '管理员接口不存在' });
+    }
     if (req.method === 'GET' && url.pathname === '/api/health') {
       return send(req, res, 200, { ok: true, service: 'arcadia-item-workshop', version: '0.1.0' });
     }
