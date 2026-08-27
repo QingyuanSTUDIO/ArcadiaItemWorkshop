@@ -22,6 +22,10 @@ if (ADMIN_PASSWORD && repository.listUsers().length === 0) {
   const now = new Date().toISOString();
   repository.createUser({ id: crypto.randomUUID(), username: process.env.ADMIN_USERNAME || 'admin', passwordHash: hashPassword(ADMIN_PASSWORD), role: 'admin', createdAt: now, updatedAt: now });
 }
+if (ADMIN_PASSWORD) {
+  const configuredAdmin = repository.findUser(process.env.ADMIN_USERNAME || 'admin');
+  if (configuredAdmin && configuredAdmin.role !== 'admin') repository.setUserRole(configuredAdmin.id, 'admin');
+}
 
 function loadEnvFile(filename) {
   try {
@@ -143,6 +147,7 @@ const server = http.createServer(async (req, res) => {
       const username = typeof body.username === 'string' ? body.username.trim() : '';
       const account = repository.findUser(username);
       if (!account || hashPassword(body.password) !== account.password_hash) return send(req, res, 401, { error: '账号或密码错误' });
+      if (account.role !== 'admin') return send(req, res, 403, { error: '该账号不是管理员' });
       const token = crypto.randomBytes(32).toString('hex'); sessions.set(token, { userId: account.id, role: account.role, expiry: Date.now() + 8 * 60 * 60 * 1000 });
       return send(req, res, 200, { ok: true, token, user: repository.getUser(account.id) }, { 'Set-Cookie': `arcadia_admin=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=28800` });
     }
