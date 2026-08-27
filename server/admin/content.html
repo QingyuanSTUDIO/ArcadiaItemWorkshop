@@ -74,6 +74,16 @@
       padding: 8px 10px;
       margin: 8px 0 12px;
     }
+    .reaction-list {
+      max-height: 120px;
+      overflow-y: auto;
+      white-space: normal;
+      line-height: 1.5;
+      padding: 8px 10px;
+      background: #1b1b1b;
+      border: 1px solid #3d3d3d;
+      border-radius: 5px;
+    }
     label {
       display: block;
       margin: 8px 0;
@@ -170,7 +180,7 @@
                 placeholder="after_character_definition" /></label
             ><label>条目内容<textarea id="content"></textarea></label>
             <div class="row"><label>下载量<input id="downloads" type="number" min="0" step="1" /></label><label>点赞量<input id="likes" type="number" min="0" step="1" /></label><label>举报量<input id="reports" type="number" min="0" step="1" /></label></div>
-            <div id="reactionUsers" class="muted"></div>
+            <div id="reactionUsers" class="muted reaction-list"></div>
             <div class="row"><label style="flex:1;min-width:180px">目标分区<select id="transferTarget"><option value="worldbook">世界书本体</option><option value="workshop">创意工坊</option><option value="review">审核队列</option></select></label><button type="button" id="transfer">保存分区</button></div>
             <div class="row">
               <button type="submit">保存</button
@@ -250,6 +260,7 @@
         if (!selected) return;
         $("empty").hidden = true;
         $("form").hidden = false;
+        $("transferTarget").value = selected.moderationStatus === "review" ? "review" : selected.module;
         $("entryMeta").innerHTML = "上传者：<b>" + esc(selected.authorName || "未知") + "</b>（ID：" + esc(selected.authorId || "未知") + "）<br>创建时间：" + esc(formatDate(selected.createdAt)) + "<br>最后更新：" + esc(formatDate(selected.updatedAt)) + "<br>当前分区：" + esc(moduleLabel(selected.module, selected.moderationStatus));
         $("id").value = selected.id;
         $("name").value = selected.name;
