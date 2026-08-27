@@ -62,6 +62,13 @@ export function openDatabase(filename) {
       UNIQUE(module, worldbook_name, uid)
     );
     CREATE INDEX IF NOT EXISTS idx_worldbook_module ON worldbook_entries(module, updated_at);
+    CREATE TABLE IF NOT EXISTS worldbook_reactions (
+      entry_id TEXT NOT NULL REFERENCES worldbook_entries(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      reaction TEXT NOT NULL CHECK(reaction IN ('like', 'report')),
+      created_at TEXT NOT NULL,
+      PRIMARY KEY(entry_id, user_id, reaction)
+    );
   `);
   try { db.exec("ALTER TABLE worldbook_entries ADD COLUMN category TEXT NOT NULL DEFAULT '商品'"); } catch (error) { if (!String(error.message).includes('duplicate column')) throw error; }
   for (const column of ['download_count', 'like_count', 'report_count']) {
@@ -137,6 +144,18 @@ export function createRepository(db, reportLimit = 5) {
     incrementWorldbookDownload(id) { db.prepare('UPDATE worldbook_entries SET download_count = download_count + 1, updated_at = updated_at WHERE id = ?').run(id); return this.getWorldbookEntry(id); },
     incrementWorldbookLike(id) { db.prepare('UPDATE worldbook_entries SET like_count = like_count + 1 WHERE id = ?').run(id); return this.getWorldbookEntry(id); },
     incrementWorldbookReport(id) { db.prepare('UPDATE worldbook_entries SET report_count = report_count + 1 WHERE id = ?').run(id); return this.getWorldbookEntry(id); },
+    reactWorldbook(id, userId, reaction) {
+      const now = new Date().toISOString();
+      try {
+        db.prepare('INSERT INTO worldbook_reactions (entry_id, user_id, reaction, created_at) VALUES (?, ?, ?, ?)').run(id, userId, reaction, now);
+      } catch (error) {
+        if (error.code === 'SQLITE_CONSTRAINT_PRIMARYKEY' || error.code === 'SQLITE_CONSTRAINT_UNIQUE') return { kind: 'duplicate' };
+        throw error;
+      }
+      const column = reaction === 'like' ? 'like_count' : 'report_count';
+      db.prepare(`UPDATE worldbook_entries SET ${column} = ${column} + 1 WHERE id = ?`).run(id);
+      return { kind: 'accepted', item: this.getWorldbookEntry(id) };
+    },
     updateWorldbookStats(id, stats) {
       db.prepare('UPDATE worldbook_entries SET download_count = ?, like_count = ?, report_count = ? WHERE id = ?').run(stats.downloadCount, stats.likeCount, stats.reportCount, id);
       return this.getWorldbookEntry(id);

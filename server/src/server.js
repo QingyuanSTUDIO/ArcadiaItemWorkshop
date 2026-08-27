@@ -275,8 +275,11 @@ const server = http.createServer(async (req, res) => {
       }
       if (req.method === 'POST' && parts.length === 5 && parts[0] === 'api' && parts[1] === 'worldbook' && parts[2] === 'workshop' && (parts[4] === 'like' || parts[4] === 'report')) {
         const id = decodePathPart(parts[3]);
-        const item = parts[4] === 'like' ? repository.incrementWorldbookLike(id) : repository.incrementWorldbookReport(id);
-        return item ? send(req, res, 200, { item }) : send(req, res, 404, { error: '创意工坊条目不存在' });
+        const existing = repository.getWorldbookEntry(id);
+        if (!existing || existing.module !== 'workshop') return send(req, res, 404, { error: '创意工坊条目不存在' });
+        const result = repository.reactWorldbook(id, user.id, parts[4]);
+        if (result.kind === 'duplicate') return send(req, res, 409, { error: parts[4] === 'like' ? '你已经赞过这个条目' : '你已经踩过这个条目' });
+        return send(req, res, 200, { item: result.item });
       }
       if (req.method === 'POST') {
         const body = await readBody(req); const now = new Date().toISOString();
