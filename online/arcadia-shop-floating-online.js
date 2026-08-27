@@ -379,6 +379,7 @@
   const networkActions = root.querySelector('.th-arcadia-network-actions');
   const networkItems = root.querySelector('.th-arcadia-network-items');
   const uploadMainlineButton = root.querySelector('.th-arcadia-upload-mainline');
+  let uploadInProgress = false;
   let networkSession = null;
   try { networkSession = JSON.parse(localStorage.getItem('th-arcadia-network-session') || 'null'); } catch (_) {}
   networkUser.value = networkSession?.username || '';
@@ -704,35 +705,30 @@
       updateNetworkState(); setStatus('联网登录成功');
     } catch (error) { networkState.textContent = `操作失败：${error.message}`; setStatus(`联网失败：${error.message}`); }
   }
-  async function networkUpload() {
-    if (!entries.length || !networkSession?.token) { setStatus('请先登录并确保已有世界书条目'); return; }
-    try {
-      let success = 0;
-      for (const entry of entries) {
-        const response = await fetch(`${networkSession.api}/api/worldbook/workshop`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...networkHeaders() }, body: JSON.stringify({ id: `tavern-${currentWorldBookName}-${entry.uid}`, worldbookName: currentWorldBookName, uid: String(entry.uid), name: entry.name || '', content: entry.content || '', strategy: entry.strategy || {}, position: entry.position || {}, enabled: entry.enabled !== false }) });
-        if (!response.ok) { const d = await response.json().catch(() => ({})); throw new Error(d.error || '上传失败'); } success += 1;
-      }
-      setStatus(`已上传 ${success} 个条目到创意工坊`);
-    } catch (error) { setStatus(`上传失败：${error.message}`); }
-  }
-
   async function uploadSelectedEntry() {
-    if (!selectedEntry || !networkSession?.token) { setStatus('请先在账户信息中登录'); return; }
+    const entry = selectedEntry;
+    if (!entry || !networkSession?.token) { setStatus('请先在账户信息中登录'); return; }
+    if (uploadInProgress) return;
+    uploadInProgress = true;
     try {
-      const response = await fetch(`${networkSession.api}/api/worldbook/workshop`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...networkHeaders() }, body: JSON.stringify({ id: `tavern-${currentWorldBookName}-${selectedEntry.uid}`, worldbookName: currentWorldBookName, uid: String(selectedEntry.uid), name: selectedEntry.name || '', category: getCategory(selectedEntry), content: selectedEntry.content || '', strategy: selectedEntry.strategy || {}, position: selectedEntry.position || {}, enabled: selectedEntry.enabled !== false }) });
+      const response = await fetch(`${networkSession.api}/api/worldbook/workshop`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...networkHeaders() }, body: JSON.stringify({ id: `tavern-${currentWorldBookName}-${entry.uid}`, worldbookName: currentWorldBookName, uid: String(entry.uid), name: entry.name || '', category: getCategory(entry), content: entry.content || '', strategy: entry.strategy || {}, position: entry.position || {}, enabled: entry.enabled !== false }) });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || '上传失败');
-      setStatus(`已上传条目：${selectedEntry.name}`);
+      setStatus(`已上传条目：${entry.name}`);
     } catch (error) { setStatus(`上传失败：${error.message}`); }
+    finally { uploadInProgress = false; }
   }
   async function uploadMainlineEntry() {
     if (!selectedEntry || networkSession?.role !== 'admin') { setStatus('仅管理员可以上传至主线世界书'); return; }
+    if (uploadInProgress) return;
+    uploadInProgress = true;
     try {
       const response = await fetch(`${networkSession.api}/api/worldbook`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...networkHeaders() }, body: JSON.stringify({ id: `tavern-${currentWorldBookName}-${selectedEntry.uid}`, worldbookName: currentWorldBookName, uid: String(selectedEntry.uid), name: selectedEntry.name || '', category: getCategory(selectedEntry), content: selectedEntry.content || '', strategy: selectedEntry.strategy || {}, position: selectedEntry.position || {}, enabled: selectedEntry.enabled !== false }) });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || '上传失败');
       setStatus(`已上传主线条目：${selectedEntry.name}`);
     } catch (error) { setStatus(`主线上传失败：${error.message}`); }
+    finally { uploadInProgress = false; }
   }
   async function networkLoadWorkshop() {
     if (!networkSession?.token) return;
@@ -1019,8 +1015,8 @@
   root.querySelector('.th-arcadia-mode-edit').addEventListener('click', () => setEditMode(true));
   root.querySelector('.th-arcadia-save').addEventListener('click', saveEntry);
   deleteButton.addEventListener('click', deleteEntry);
-  uploadEntryButton.addEventListener('click', uploadSelectedEntry);
-  root.querySelector('.th-arcadia-upload-mainline').addEventListener('click', uploadMainlineEntry);
+  uploadEntryButton.addEventListener('click', event => { event.preventDefault(); event.stopImmediatePropagation(); uploadSelectedEntry(); });
+  root.querySelector('.th-arcadia-upload-mainline').addEventListener('click', event => { event.preventDefault(); event.stopImmediatePropagation(); uploadMainlineEntry(); });
 
   // 悬浮球拖拽；窗口始终绑定在悬浮球上方。
   let dragging = false;
