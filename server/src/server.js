@@ -223,6 +223,10 @@ const server = http.createServer(async (req, res) => {
         const item = repository.adminGet(parts[3]);
         return item ? send(req, res, 200, { item }) : send(req, res, 404, { error: '条目不存在' });
       }
+      if (req.method === 'GET' && parts.length === 5 && parts[0] === 'api' && parts[1] === 'admin' && parts[2] === 'worldbook' && parts[4] === 'reactions') {
+        const reactions = repository.listWorldbookReactions(decodePathPart(parts[3]));
+        return send(req, res, 200, { reactions });
+      }
       if (req.method === 'GET' && url.pathname === '/api/admin/items') {
         const filter = { query: (url.searchParams.get('q') || '').trim().slice(0, 100), status: url.searchParams.get('status') || '', limit: parseInteger(url.searchParams.get('limit'), 100, 1, 200), offset: parseInteger(url.searchParams.get('offset'), 0, 0, 1_000_000) };
         return send(req, res, 200, { total: repository.adminCount(filter), items: repository.adminList(filter) });

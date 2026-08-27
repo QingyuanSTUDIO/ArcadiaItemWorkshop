@@ -156,6 +156,12 @@ export function createRepository(db, reportLimit = 5) {
       db.prepare(`UPDATE worldbook_entries SET ${column} = ${column} + 1 WHERE id = ?`).run(id);
       return { kind: 'accepted', item: this.getWorldbookEntry(id) };
     },
+    listWorldbookReactions(id) {
+      return db.prepare(`SELECT r.reaction, r.created_at, u.id AS user_id, u.username
+        FROM worldbook_reactions r JOIN users u ON u.id = r.user_id
+        WHERE r.entry_id = ? ORDER BY r.created_at DESC`).all(id)
+        .map(row => ({ reaction: row.reaction, userId: row.user_id, username: row.username, createdAt: row.created_at }));
+    },
     updateWorldbookStats(id, stats) {
       db.prepare('UPDATE worldbook_entries SET download_count = ?, like_count = ?, report_count = ? WHERE id = ?').run(stats.downloadCount, stats.likeCount, stats.reportCount, id);
       return this.getWorldbookEntry(id);

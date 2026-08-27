@@ -158,6 +158,7 @@
                 placeholder="after_character_definition" /></label
             ><label>条目内容<textarea id="content"></textarea></label>
             <div class="row"><label>下载量<input id="downloads" type="number" min="0" step="1" /></label><label>点赞量<input id="likes" type="number" min="0" step="1" /></label><label>举报量<input id="reports" type="number" min="0" step="1" /></label></div>
+            <div id="reactionUsers" class="muted"></div>
             <div class="row">
               <button type="submit">保存</button
               ><button type="button" class="danger" id="remove">删除</button>
@@ -245,6 +246,14 @@
         $("downloads").value = selected.downloadCount ?? 0;
         $("likes").value = selected.likeCount ?? 0;
         $("reports").value = selected.reportCount ?? 0;
+        $("reactionUsers").textContent = "正在读取互动账号…";
+        api("/api/admin/worldbook/" + encodeURIComponent(selected.id) + "/reactions")
+          .then((data) => {
+            const likes = (data.reactions || []).filter((r) => r.reaction === "like").map((r) => r.username);
+            const reports = (data.reactions || []).filter((r) => r.reaction === "report").map((r) => r.username);
+            $("reactionUsers").textContent = "点赞者：" + (likes.join("、") || "无") + "；踩/举报者：" + (reports.join("、") || "无");
+          })
+          .catch((error) => { $("reactionUsers").textContent = "互动账号读取失败：" + error.message; });
         render();
       }
       $("form").onsubmit = async (e) => {
