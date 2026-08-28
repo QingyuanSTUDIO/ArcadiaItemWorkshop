@@ -189,6 +189,13 @@
                 <div class="th-arcadia-mine-items"></div><div class="th-arcadia-mine-pager"></div>
               </div>
             </details>
+            <details class="th-arcadia-settings-module th-arcadia-downloaded-module">
+              <summary>我下载的创意工坊</summary>
+              <div class="th-arcadia-settings-module-body">
+                <div class="th-arcadia-downloaded-actions"><button class="th-arcadia-downloaded-update" type="button">更新创意工坊</button><button class="th-arcadia-downloaded-delete-all" type="button">删除本地全部创意工坊</button></div>
+                <div class="th-arcadia-downloaded-items"></div>
+              </div>
+            </details>
           </div>
         </article>
       </div>
@@ -319,6 +326,9 @@
     #${ROOT_ID} .th-arcadia-mine-actions button { border: 0; border-radius: 4px; padding: 7px 9px; background: #e89424; color: #fff; cursor: pointer; }
     #${ROOT_ID} .th-arcadia-mine-delete { flex: 0 0 auto; border: 0; border-radius: 4px; padding: 6px 10px; background: #c94343; color: #fff; cursor: pointer; }
     #${ROOT_ID} .th-arcadia-mine-delete:hover { background: #e05757; }
+    #${ROOT_ID} .th-arcadia-downloaded-actions { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
+    #${ROOT_ID} .th-arcadia-downloaded-actions button { border: 0; border-radius: 4px; padding: 7px 9px; background: #e89424; color: #fff; cursor: pointer; }
+    #${ROOT_ID} .th-arcadia-downloaded-delete-all, #${ROOT_ID} .th-arcadia-downloaded-delete { background: #c94343 !important; color: #fff; }
     #${ROOT_ID} .th-arcadia-network-auth-row button, #${ROOT_ID} .th-arcadia-network-actions button { border: 0; border-radius: 4px; padding: 7px 9px; background: #e89424; color: #fff; cursor: pointer; }
     #${ROOT_ID} .th-arcadia-network-items { display: grid; gap: 5px; margin-top: 8px; }
     #${ROOT_ID} .th-arcadia-pager { display: flex; align-items: center; justify-content: center; gap: 4px; margin-top: 8px; }
@@ -502,6 +512,9 @@
   const minePager = root.querySelector('.th-arcadia-mine-pager');
   const mineRefresh = root.querySelector('.th-arcadia-mine-refresh');
   const mineCollapseAll = root.querySelector('.th-arcadia-mine-collapse-all');
+  const downloadedItems = root.querySelector('.th-arcadia-downloaded-items');
+  const downloadedUpdate = root.querySelector('.th-arcadia-downloaded-update');
+  const downloadedDeleteAll = root.querySelector('.th-arcadia-downloaded-delete-all');
   let uploadInProgress = false;
   let refreshingAll = false;
   let workshopOffset = 0;
@@ -607,6 +620,31 @@
     if (!local) return new Set();
     return new Set(TAG_DEFS.filter(([tag]) => contentFingerprint(taggedValue(local.content, tag)) !== contentFingerprint(taggedValue(item.content, tag))).map(([tag]) => tag));
   }
+  function downloadedWorkshopPairs() {
+    const workshop = [...sourceIndex.values()].flat().filter(item => item.module === 'workshop');
+    const pairs = [];
+    allWorldbookEntries.forEach(local => {
+      const remote = workshop.find(item => sourceKey(item.name) === sourceKey(local.name));
+      if (remote) pairs.push({ local, remote, needsUpdate: contentFingerprint(local.content) !== contentFingerprint(remote.content) });
+    });
+    return pairs;
+  }
+  function renderDownloadedWorkshop() {
+    const pairs = downloadedWorkshopPairs();
+    downloadedItems.innerHTML = pairs.length ? pairs.map(({ local, remote, needsUpdate }, index) => `<details class="th-arcadia-network-item" data-index="${index}"><summary><span class="th-arcadia-entry-status-dot ${needsUpdate ? 'th-arcadia-entry-status-workshop-updated' : 'th-arcadia-entry-status-workshop-downloaded'}"></span><span class="th-arcadia-network-item-title">${escapeHtml(local.name)}</span><span class="th-arcadia-network-item-stats">${needsUpdate ? '待更新' : '已同步'}</span><button type="button" class="th-arcadia-downloaded-delete">删除本地</button></summary><div class="th-arcadia-network-item-body"><div class="th-arcadia-workshop-sections">${workshopTaggedSections(local.content)}</div></div></details>`).join('') : '<div class="th-arcadia-settings-hint">暂无已下载的创意工坊条目</div>';
+    downloadedItems.querySelectorAll('.th-arcadia-downloaded-delete').forEach(button => button.addEventListener('click', async event => {
+      event.preventDefault(); event.stopPropagation();
+      const pair = downloadedWorkshopPairs()[Number(button.closest('.th-arcadia-network-item')?.dataset.index)];
+      if (!pair || !parentWindow.confirm(`真的要删除本地条目“${pair.local.name}”吗？`)) return;
+      try {
+        const result = await parentWindow.TavernHelper.deleteWorldbookEntries(currentWorldBookName, entry => entry.uid === pair.local.uid);
+        allWorldbookEntries = result.worldbook || [];
+        entries = pickProductEntries(allWorldbookEntries);
+        renderList(); renderDownloadedWorkshop();
+        setStatus(`已删除本地条目：${pair.local.name}`);
+      } catch (error) { setStatus(`删除本地条目失败：${error.message}`); }
+    }));
+  }
   function workshopStatus(item) {
     const locals = localEntriesWithName(item.name);
     if (!locals.length) return ['workshop-missing', '未下载'];
@@ -651,6 +689,7 @@
         sourceIndex.get(key).push(item);
       });
       renderList();
+      renderDownloadedWorkshop();
     } catch (_) {}
   }
 
@@ -803,6 +842,7 @@
       allWorldbookEntries = allEntries;
       entries = pickProductEntries(allEntries);
       renderList();
+      renderDownloadedWorkshop();
       if (entries.length) {
         const first = sidebar.querySelector('.th-arcadia-item');
         first?.click();
@@ -1059,6 +1099,29 @@
       mineItems.querySelectorAll('.th-arcadia-workshop-section').forEach(section => { section.open = false; });
       renderPager(minePager, data.total || 0, mineOffset, offset => { mineOffset = offset; networkLoadMine(); });
     } catch (error) { setStatus(`读取我的创意工坊失败：${error.message}`); }
+  }
+  async function updateDownloadedWorkshop() {
+    if (!networkSession?.token || !currentWorldBookName) { setStatus('请先登录并读取本地世界书'); return; }
+    const pairs = downloadedWorkshopPairs().filter(pair => pair.needsUpdate);
+    if (!pairs.length) { setStatus('没有需要更新的已下载条目'); return; }
+    if (!parentWindow.confirm(`确定更新 ${pairs.length} 个本地创意工坊条目吗？`)) return;
+    for (const pair of pairs) await downloadWorkshopItem(pair.remote, true);
+    renderDownloadedWorkshop();
+    setStatus(`已更新 ${pairs.length} 个本地创意工坊条目`);
+  }
+  async function deleteAllDownloadedWorkshop() {
+    if (!currentWorldBookName) return;
+    const pairs = downloadedWorkshopPairs();
+    if (!pairs.length) { setStatus('没有可删除的本地创意工坊条目'); return; }
+    if (!parentWindow.confirm(`真的要删除本地全部 ${pairs.length} 个创意工坊条目吗？此操作不可撤销。`)) return;
+    try {
+      const uids = new Set(pairs.map(pair => pair.local.uid));
+      const result = await parentWindow.TavernHelper.deleteWorldbookEntries(currentWorldBookName, entry => uids.has(entry.uid));
+      allWorldbookEntries = result.worldbook || [];
+      entries = pickProductEntries(allWorldbookEntries);
+      renderList(); renderDownloadedWorkshop();
+      setStatus(`已删除本地 ${pairs.length} 个创意工坊条目`);
+    } catch (error) { setStatus(`批量删除失败：${error.message}`); }
   }
   async function updateMainlineWorldbook() {
     if (networkSession?.role !== 'admin' || !currentWorldBookName) { setStatus('仅管理员可以从主线更新本地世界书'); return; }
@@ -1403,6 +1466,8 @@
   mineSort.addEventListener('change', () => { mineOffset = 0; networkLoadMine(); });
   mineSearch.addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); mineOffset = 0; networkLoadMine(); } });
   mineCollapseAll.addEventListener('click', () => mineItems.querySelectorAll('details').forEach(section => { section.open = false; }));
+  downloadedUpdate.addEventListener('click', updateDownloadedWorkshop);
+  downloadedDeleteAll.addEventListener('click', deleteAllDownloadedWorkshop);
   aiWriteButton.addEventListener('click', aiWrite);
   renameButton.addEventListener('click', () => {
     const editing = editorName.readOnly;
