@@ -43,6 +43,12 @@ export function openDatabase(filename) {
       updated_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
+    CREATE TABLE IF NOT EXISTS ip_bans (
+      ip TEXT PRIMARY KEY,
+      ban_until TEXT NOT NULL,
+      reason TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS worldbook_entries (
       id TEXT PRIMARY KEY,
       module TEXT NOT NULL CHECK(module IN ('worldbook', 'workshop')),
@@ -71,6 +77,13 @@ export function openDatabase(filename) {
       PRIMARY KEY(entry_id, user_id, reaction)
     );
   `);
+  for (const definition of [
+    "last_ip TEXT NOT NULL DEFAULT ''",
+    "ban_until TEXT NOT NULL DEFAULT ''",
+    "ban_type TEXT NOT NULL DEFAULT ''",
+  ]) {
+    try { db.exec(`ALTER TABLE users ADD COLUMN ${definition}`); } catch (error) { if (!String(error.message).includes('duplicate column')) throw error; }
+  }
   try { db.exec("ALTER TABLE worldbook_entries ADD COLUMN category TEXT NOT NULL DEFAULT '商品'"); } catch (error) { if (!String(error.message).includes('duplicate column')) throw error; }
   for (const column of ['download_count', 'like_count', 'report_count']) {
     try { db.exec(`ALTER TABLE worldbook_entries ADD COLUMN ${column} INTEGER NOT NULL DEFAULT 0`); } catch (error) { if (!String(error.message).includes('duplicate column')) throw error; }
@@ -87,7 +100,7 @@ export function createRepository(db, reportLimit = 5) {
   const getPublic = db.prepare("SELECT * FROM items WHERE id = ? AND status = 'published'");
   const getAny = db.prepare('SELECT * FROM items WHERE id = ?');
   const getUserByUsername = db.prepare('SELECT * FROM users WHERE username = ?');
-  const getUserById = db.prepare('SELECT id, username, role, created_at, updated_at FROM users WHERE id = ?');
+  const getUserById = db.prepare('SELECT id, username, role, last_ip, ban_until, ban_type, created_at, updated_at FROM users WHERE id = ?');
   const parseJsonObject = value => {
     try {
       const parsed = JSON.parse(value || '{}');
@@ -126,7 +139,19 @@ export function createRepository(db, reportLimit = 5) {
     },
     findUser(username) { return getUserByUsername.get(username); },
     getUser(id) { return getUserById.get(id) || null; },
-    listUsers() { return db.prepare('SELECT id, username, role, created_at, updated_at FROM users ORDER BY created_at').all(); },
+    listUsers() {
+      const rows = db.prepare(`SELECT u.id, u.username, u.role, u.last_ip, u.ban_until, u.ban_type,
+        u.created_at, u.updated_at, ib.ban_until AS ip_ban_until
+        FROM users u LEFT JOIN ip_bans ib ON ib.ip = u.last_ip ORDER BY u.created_at`).all();
+      return rows.map(row => ({ ...row, account_banned: row.ban_type === 'account' && Number.isFinite(new Date(row.ban_until).getTime()) && new Date(row.ban_until).getTime() > Date.now(), ip_banned: Number.isFinite(new Date(row.ip_ban_until).getTime()) && new Date(row.ip_ban_until).getTime() > Date.now() }));
+    },
+    touchUserIp(id, ip) { db.prepare('UPDATE users SET last_ip = ?, updated_at = ? WHERE id = ?').run(ip, new Date().toISOString(), id); },
+    setUserBan(id, until, type = 'account') { const result = db.prepare('UPDATE users SET ban_until = ?, ban_type = ?, updated_at = ? WHERE id = ?').run(until, type === 'account' ? 'account' : '', new Date().toISOString(), id); return result.changes ? getUserById.get(id) : null; },
+    clearUserBan(id) { const result = db.prepare("UPDATE users SET ban_until = '', ban_type = '', updated_at = ? WHERE id = ?").run(new Date().toISOString(), id); return result.changes ? getUserById.get(id) : null; },
+    getActiveUserBan(id) { const row = db.prepare("SELECT ban_until FROM users WHERE id = ? AND ban_type = 'account' AND ban_until <> ''").get(id); return row && new Date(row.ban_until).getTime() > Date.now() ? row.ban_until : null; },
+    setIpBan(ip, until, reason = '') { db.prepare('INSERT INTO ip_bans (ip, ban_until, reason, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(ip) DO UPDATE SET ban_until=excluded.ban_until, reason=excluded.reason').run(ip, until, reason, new Date().toISOString()); },
+    clearIpBan(ip) { return db.prepare('DELETE FROM ip_bans WHERE ip = ?').run(ip).changes > 0; },
+    getActiveIpBan(ip) { const row = db.prepare('SELECT ban_until FROM ip_bans WHERE ip = ?').get(ip); return row && new Date(row.ban_until).getTime() > Date.now() ? row.ban_until : null; },
     setUserRole(id, role) {
       const result = db.prepare("UPDATE users SET role = ?, updated_at = ? WHERE id = ?").run(role, new Date().toISOString(), id);
       return result.changes ? getUserById.get(id) : null;

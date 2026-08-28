@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import http from 'node:http';
+import net from 'node:net';
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -47,6 +48,18 @@ function loadEnvFile(filename) {
 function parseInteger(value, fallback, min, max) {
   const number = Number(value);
   return Number.isInteger(number) && number >= min && number <= max ? number : fallback;
+}
+
+function banUntil(value) {
+  const duration = String(value || '').trim().toLowerCase();
+  if (duration === 'permanent' || duration === 'forever' || duration === '永久') return '9999-12-31T23:59:59.999Z';
+  const match = duration.match(/^(\d{1,7})(m|h|d|w)$/);
+  if (!match) throw new ValidationError('封禁时间格式不合法，应为 30m、12h、7d、2w 或 permanent');
+  const amount = Number(match[1]);
+  const multipliers = { m: 60 * 1000, h: 60 * 60 * 1000, d: 24 * 60 * 60 * 1000, w: 7 * 24 * 60 * 60 * 1000 };
+  const timestamp = Date.now() + amount * multipliers[match[2]];
+  if (!Number.isFinite(timestamp) || timestamp <= Date.now()) throw new ValidationError('封禁时间必须大于 0');
+  return new Date(timestamp).toISOString();
 }
 
 function nonNegativeInteger(value, fallback = 0) {
@@ -114,6 +127,10 @@ function reporterHash(req) {
   const agent = String(req.headers['user-agent'] || 'unknown');
   return crypto.createHash('sha256').update(`${address}\n${agent}`).digest('hex');
 }
+function clientIp(req) {
+  const forwarded = trustProxy ? String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() : '';
+  return forwarded || req.socket.remoteAddress || 'unknown';
+}
 
 function publicSummary(item) {
   const { entry, reportCount, ...summary } = item;
@@ -162,11 +179,30 @@ function isAdmin(req) {
 }
 function requireAdmin(req, res) {
   if (!ADMIN_PASSWORD) { send(req, res, 503, { error: '服务端尚未设置 ADMIN_PASSWORD' }); return false; }
-  if (!isAdmin(req)) { send(req, res, 401, { error: '需要管理员登录' }); return false; }
+  const user = currentUser(req);
+  if (!user || !isAdminUser(user)) { send(req, res, 401, { error: '需要管理员登录' }); return false; }
+  const ban = banError(req, user);
+  if (ban) { send(req, res, 403, ban); return false; }
+  repository.touchUserIp(user.id, clientIp(req));
   return true;
 }
 function currentUser(req) { const session = sessionForToken(authToken(req)); return session ? repository.getUser(session.userId) : null; }
 function requireUser(req, res) { const user = currentUser(req); if (!user) { send(req, res, 401, { error: '需要登录' }); return null; } return user; }
+function banError(req, user) {
+  const ipUntil = repository.getActiveIpBan(clientIp(req));
+  const accountUntil = user ? repository.getActiveUserBan(user.id) : null;
+  if (ipUntil) return { error: '当前 IP 已被封禁', method: 'ip', until: ipUntil };
+  if (accountUntil) return { error: '账号已被封禁', method: 'account', until: accountUntil };
+  return null;
+}
+function requireUserWithBan(req, res) {
+  const user = requireUser(req, res);
+  if (!user) return null;
+  const ban = banError(req, user);
+  if (ban) { send(req, res, 403, ban); return null; }
+  repository.touchUserIp(user.id, clientIp(req));
+  return user;
+}
 function isAdminUser(user) { return user?.role === 'admin'; }
 function sendFile(res, filename, contentType) {
   try { res.writeHead(200, { 'Content-Type': contentType, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' }); res.end(fs.readFileSync(filename)); }
@@ -185,15 +221,19 @@ const server = http.createServer(async (req, res) => {
       return sendFile(res, path.join(ROOT, 'admin', file), 'text/html; charset=utf-8');
     }
     if (req.method === 'POST' && url.pathname === '/api/admin/login') {
+      const ipBan = repository.getActiveIpBan(clientIp(req)); if (ipBan) return send(req, res, 403, { error: '当前 IP 已被封禁', until: ipBan });
       const body = await readBody(req);
       const username = typeof body.username === 'string' ? body.username.trim() : '';
       const account = repository.findUser(username);
       if (!account || hashPassword(body.password) !== account.password_hash) return send(req, res, 401, { error: '账号或密码错误' });
+      const accountBan = repository.getActiveUserBan(account.id); if (accountBan) return send(req, res, 403, { error: '账号已被封禁', until: accountBan });
       if (account.role !== 'admin') return send(req, res, 403, { error: '该账号不是管理员' });
       const token = issueSession(account);
-      return send(req, res, 200, { ok: true, token, user: repository.getUser(account.id) }, { 'Set-Cookie': `arcadia_admin=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=28800` });
+      repository.touchUserIp(account.id, clientIp(req));
+      return send(req, res, 200, { ok: true, token, user: repository.getUser(account.id) }, { 'Set-Cookie': `arcadia_admin=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${Math.floor(SESSION_TTL_MS / 1000)}` });
     }
     if (req.method === 'POST' && url.pathname === '/api/auth/register') {
+      const ipBan = repository.getActiveIpBan(clientIp(req)); if (ipBan) return send(req, res, 403, { error: '当前 IP 已被封禁', until: ipBan });
       const body = await readBody(req); const username = typeof body.username === 'string' ? body.username.trim() : '';
       if (!/^[\w-]{3,32}$/.test(username) || typeof body.password !== 'string' || body.password.length < 8) throw new ValidationError('用户名需为 3-32 位字母、数字、下划线或短横线，密码至少 8 位');
       if (repository.findUser(username)) return send(req, res, 409, { error: '用户名已存在' });
@@ -201,13 +241,18 @@ const server = http.createServer(async (req, res) => {
       return send(req, res, 201, { user });
     }
     if (req.method === 'POST' && url.pathname === '/api/auth/login') {
+      const ipBan = repository.getActiveIpBan(clientIp(req)); if (ipBan) return send(req, res, 403, { error: '当前 IP 已被封禁', until: ipBan });
       const body = await readBody(req); const account = repository.findUser(String(body.username || '').trim());
       if (!account || hashPassword(body.password) !== account.password_hash) return send(req, res, 401, { error: '账号或密码错误' });
+      const accountBan = repository.getActiveUserBan(account.id); if (accountBan) return send(req, res, 403, { error: '账号已被封禁', until: accountBan });
       const token = issueSession(account);
-      return send(req, res, 200, { token, user: repository.getUser(account.id) }, { 'Set-Cookie': `arcadia_admin=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=28800` });
+      repository.touchUserIp(account.id, clientIp(req));
+      return send(req, res, 200, { token, user: repository.getUser(account.id) }, { 'Set-Cookie': `arcadia_admin=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${Math.floor(SESSION_TTL_MS / 1000)}` });
     }
     if (req.method === 'GET' && url.pathname === '/api/auth/me') {
       const user = currentUser(req);
+      const ban = user && banError(req, user); if (ban) return send(req, res, 403, ban);
+      if (user) repository.touchUserIp(user.id, clientIp(req));
       return user ? send(req, res, 200, { user }) : send(req, res, 401, { error: '未登录' });
     }
     if (req.method === 'POST' && url.pathname === '/api/auth/logout') {
@@ -233,6 +278,37 @@ const server = http.createServer(async (req, res) => {
         return send(req, res, 200, { total: repository.adminCount(filter), items: repository.adminList(filter) });
       }
       if (req.method === 'GET' && url.pathname === '/api/admin/users') return send(req, res, 200, { users: repository.listUsers() });
+      if (req.method === 'POST' && parts.length === 5 && parts[0] === 'api' && parts[1] === 'admin' && parts[2] === 'users' && parts[4] === 'ban') {
+        const id = decodePathPart(parts[3]);
+        const target = repository.getUser(id);
+        if (!target) return send(req, res, 404, { error: '用户不存在' });
+        const body = await readBody(req);
+        if (!['ban', 'unban'].includes(body.action)) throw new ValidationError('封禁操作必须是 ban 或 unban');
+        if (!['account', 'ip'].includes(body.method)) throw new ValidationError('封禁方式必须是 account 或 ip');
+        const method = body.method;
+        if (body.action === 'unban') {
+          if (method === 'ip') {
+            if (!target.last_ip) return send(req, res, 400, { error: '该用户还没有记录连接 IP' });
+            repository.clearIpBan(target.last_ip);
+          } else repository.clearUserBan(id);
+          return send(req, res, 200, { user: repository.getUser(id), method, action: 'unban' });
+        }
+        const until = banUntil(body.duration);
+        if (method === 'ip') {
+          const ip = String(body.ip || target.last_ip || '').trim();
+          if (!ip || ip === 'unknown' || !net.isIP(ip)) return send(req, res, 400, { error: '该用户还没有有效的连接 IP，无法封禁 IP' });
+          repository.setIpBan(ip, until, String(body.reason || '').slice(0, 200));
+        } else repository.setUserBan(id, until, 'account');
+        return send(req, res, 200, { user: repository.getUser(id), method, until });
+      }
+      if (req.method === 'POST' && url.pathname === '/api/admin/ip-bans') {
+        const body = await readBody(req);
+        const ip = String(body.ip || '').trim();
+        if (!ip || ip.length > 128 || /[\r\n]/.test(ip) || !net.isIP(ip)) throw new ValidationError('IP 地址不合法');
+        const until = banUntil(body.duration);
+        repository.setIpBan(ip, until, String(body.reason || '').slice(0, 200));
+        return send(req, res, 200, { ip, until });
+      }
       if (req.method === 'GET' && url.pathname === '/api/admin/worldbook') {
         const requestedModule = url.searchParams.get('module');
         const module = requestedModule === 'workshop' || requestedModule === 'review' ? requestedModule : 'worldbook';
@@ -280,7 +356,7 @@ const server = http.createServer(async (req, res) => {
       return send(req, res, 404, { error: '管理员接口不存在' });
     }
     if (url.pathname.startsWith('/api/worldbook')) {
-      const user = requireUser(req, res); if (!user) return;
+      const user = requireUserWithBan(req, res); if (!user) return;
       const module = url.pathname.startsWith('/api/worldbook/workshop') ? 'workshop' : 'worldbook';
       if (module === 'worldbook' && !isAdminUser(user)) return send(req, res, 403, { error: '世界书本体仅管理员可修改' });
       if (req.method === 'GET') {

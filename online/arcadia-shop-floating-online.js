@@ -192,8 +192,9 @@
             <details class="th-arcadia-settings-module th-arcadia-downloaded-module">
               <summary>我下载的创意工坊</summary>
               <div class="th-arcadia-settings-module-body">
+                <div class="th-arcadia-workshop-filters"><select class="th-arcadia-downloaded-category"><option value="">全部分类</option><option>商品</option><option>综合商品</option><option>生物</option><option>药品</option><option>改造</option><option>特殊改造</option><option>装备</option><option>武器</option></select><select class="th-arcadia-downloaded-sort"><option value="newest">更新时间：最新</option><option value="oldest">更新时间：最早</option><option value="downloads_desc">下载量：从高到低</option><option value="downloads_asc">下载量：从低到高</option><option value="likes_desc">点赞量：从高到低</option><option value="likes_asc">点赞量：从低到高</option></select><input class="th-arcadia-downloaded-search" type="search" placeholder="搜索条目名称"></div>
                 <div class="th-arcadia-downloaded-actions"><button class="th-arcadia-downloaded-update" type="button">更新创意工坊</button><button class="th-arcadia-downloaded-delete-all" type="button">删除本地全部创意工坊</button></div>
-                <div class="th-arcadia-downloaded-items"></div>
+                <div class="th-arcadia-downloaded-items"></div><div class="th-arcadia-downloaded-pager"></div>
               </div>
             </details>
           </div>
@@ -328,7 +329,9 @@
     #${ROOT_ID} .th-arcadia-mine-delete:hover { background: #e05757; }
     #${ROOT_ID} .th-arcadia-downloaded-actions { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
     #${ROOT_ID} .th-arcadia-downloaded-actions button { border: 0; border-radius: 4px; padding: 7px 9px; background: #e89424; color: #fff; cursor: pointer; }
-    #${ROOT_ID} .th-arcadia-downloaded-delete-all, #${ROOT_ID} .th-arcadia-downloaded-delete { background: #c94343 !important; color: #fff; }
+    #${ROOT_ID} .th-arcadia-downloaded-delete-all { background: #c94343 !important; color: #fff; }
+    #${ROOT_ID} .th-arcadia-downloaded-delete { flex: 0 0 auto; border: 0; border-radius: 4px; padding: 6px 10px; background: #c94343 !important; color: #fff; cursor: pointer; }
+    #${ROOT_ID} .th-arcadia-downloaded-delete:hover, #${ROOT_ID} .th-arcadia-downloaded-delete-all:hover { background: #e05757 !important; }
     #${ROOT_ID} .th-arcadia-network-auth-row button, #${ROOT_ID} .th-arcadia-network-actions button { border: 0; border-radius: 4px; padding: 7px 9px; background: #e89424; color: #fff; cursor: pointer; }
     #${ROOT_ID} .th-arcadia-network-items { display: grid; gap: 5px; margin-top: 8px; }
     #${ROOT_ID} .th-arcadia-pager { display: flex; align-items: center; justify-content: center; gap: 4px; margin-top: 8px; }
@@ -513,6 +516,10 @@
   const mineRefresh = root.querySelector('.th-arcadia-mine-refresh');
   const mineCollapseAll = root.querySelector('.th-arcadia-mine-collapse-all');
   const downloadedItems = root.querySelector('.th-arcadia-downloaded-items');
+  const downloadedCategory = root.querySelector('.th-arcadia-downloaded-category');
+  const downloadedSort = root.querySelector('.th-arcadia-downloaded-sort');
+  const downloadedSearch = root.querySelector('.th-arcadia-downloaded-search');
+  const downloadedPager = root.querySelector('.th-arcadia-downloaded-pager');
   const downloadedUpdate = root.querySelector('.th-arcadia-downloaded-update');
   const downloadedDeleteAll = root.querySelector('.th-arcadia-downloaded-delete-all');
   let uploadInProgress = false;
@@ -520,6 +527,7 @@
   let workshopOffset = 0;
   let mainlineOffset = 0;
   let mineOffset = 0;
+  let downloadedOffset = 0;
   let networkSession = null;
   try { networkSession = JSON.parse(localStorage.getItem('th-arcadia-network-session') || 'null'); } catch (_) {}
   networkUser.value = networkSession?.username || '';
@@ -630,11 +638,15 @@
     return pairs;
   }
   function renderDownloadedWorkshop() {
-    const pairs = downloadedWorkshopPairs();
-    downloadedItems.innerHTML = pairs.length ? pairs.map(({ local, remote, needsUpdate }, index) => `<details class="th-arcadia-network-item" data-index="${index}"><summary><span class="th-arcadia-entry-status-dot ${needsUpdate ? 'th-arcadia-entry-status-workshop-updated' : 'th-arcadia-entry-status-workshop-downloaded'}"></span><span class="th-arcadia-network-item-title">${escapeHtml(local.name)}</span><span class="th-arcadia-network-item-stats">${needsUpdate ? '待更新' : '已同步'}</span><button type="button" class="th-arcadia-downloaded-delete">删除本地</button></summary><div class="th-arcadia-network-item-body"><div class="th-arcadia-workshop-sections">${workshopTaggedSections(local.content)}</div></div></details>`).join('') : '<div class="th-arcadia-settings-hint">暂无已下载的创意工坊条目</div>';
+    const query = downloadedSearch.value.trim().toLocaleLowerCase();
+    const filtered = downloadedWorkshopPairs().filter(({ local, remote }) => (!downloadedCategory.value || getCategory(local) === downloadedCategory.value) && (!query || String(local.name).toLocaleLowerCase().includes(query) || String(remote.authorName || '').toLocaleLowerCase().includes(query)));
+    const sort = downloadedSort.value;
+    filtered.sort((a, b) => sort === 'oldest' ? String(a.remote.createdAt || '').localeCompare(String(b.remote.createdAt || '')) : sort === 'downloads_desc' ? (b.remote.downloadCount || 0) - (a.remote.downloadCount || 0) : sort === 'downloads_asc' ? (a.remote.downloadCount || 0) - (b.remote.downloadCount || 0) : sort === 'likes_desc' ? (b.remote.likeCount || 0) - (a.remote.likeCount || 0) : sort === 'likes_asc' ? (a.remote.likeCount || 0) - (b.remote.likeCount || 0) : String(b.remote.updatedAt || '').localeCompare(String(a.remote.updatedAt || '')));
+    const pageItems = filtered.slice(downloadedOffset, downloadedOffset + 10);
+    downloadedItems.innerHTML = pageItems.length ? pageItems.map(({ local, remote, needsUpdate }, index) => `<details class="th-arcadia-network-item" data-index="${index}"><summary><span class="th-arcadia-entry-status-dot ${needsUpdate ? 'th-arcadia-entry-status-workshop-updated' : 'th-arcadia-entry-status-workshop-downloaded'}"></span><span class="th-arcadia-network-item-title">${escapeHtml(local.name)}</span><span class="th-arcadia-network-item-stats">${needsUpdate ? '待更新' : '已同步'}</span><button type="button" class="th-arcadia-downloaded-delete">删除本地</button></summary><div class="th-arcadia-network-item-body"><div class="th-arcadia-workshop-sections">${workshopTaggedSections(local.content)}</div></div></details>`).join('') : '<div class="th-arcadia-settings-hint">暂无符合条件的已下载条目</div>';
     downloadedItems.querySelectorAll('.th-arcadia-downloaded-delete').forEach(button => button.addEventListener('click', async event => {
       event.preventDefault(); event.stopPropagation();
-      const pair = downloadedWorkshopPairs()[Number(button.closest('.th-arcadia-network-item')?.dataset.index)];
+      const pair = pageItems[Number(button.closest('.th-arcadia-network-item')?.dataset.index)];
       if (!pair || !parentWindow.confirm(`真的要删除本地条目“${pair.local.name}”吗？`)) return;
       try {
         const result = await parentWindow.TavernHelper.deleteWorldbookEntries(currentWorldBookName, entry => entry.uid === pair.local.uid);
@@ -644,6 +656,7 @@
         setStatus(`已删除本地条目：${pair.local.name}`);
       } catch (error) { setStatus(`删除本地条目失败：${error.message}`); }
     }));
+    renderPager(downloadedPager, filtered.length, downloadedOffset, offset => { downloadedOffset = offset; renderDownloadedWorkshop(); });
   }
   function workshopStatus(item) {
     const locals = localEntriesWithName(item.name);
@@ -1468,6 +1481,9 @@
   mineCollapseAll.addEventListener('click', () => mineItems.querySelectorAll('details').forEach(section => { section.open = false; }));
   downloadedUpdate.addEventListener('click', updateDownloadedWorkshop);
   downloadedDeleteAll.addEventListener('click', deleteAllDownloadedWorkshop);
+  downloadedCategory.addEventListener('change', () => { downloadedOffset = 0; renderDownloadedWorkshop(); });
+  downloadedSort.addEventListener('change', () => { downloadedOffset = 0; renderDownloadedWorkshop(); });
+  downloadedSearch.addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); downloadedOffset = 0; renderDownloadedWorkshop(); } });
   aiWriteButton.addEventListener('click', aiWrite);
   renameButton.addEventListener('click', () => {
     const editing = editorName.readOnly;

@@ -5,7 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>阿卡狄亚工坊 · 用户管理</title>
   <style>
-    body{font-family:system-ui;margin:0;background:#171717;color:#eee}.bar{background:#d9a441;color:#171717;padding:16px 22px;display:flex;align-items:center;gap:18px}.bar a{color:#171717;font-weight:700}.wrap{max-width:900px;margin:28px auto;padding:0 16px}.panel{background:#242424;border:1px solid #444;border-radius:8px;padding:20px}.toolbar{display:flex;justify-content:space-between;align-items:center}.user{border-top:1px solid #444;padding:14px 0;display:flex;justify-content:space-between;align-items:center;gap:12px}.user:first-child{border-top:0}button{font:inherit;padding:9px 12px;border:0;border-radius:5px;background:#d9a441;color:#171717;cursor:pointer}.danger{background:#c85555;color:#fff}.muted{color:#aaa}
+    body{font-family:system-ui;margin:0;background:#171717;color:#eee}.bar{background:#d9a441;color:#171717;padding:16px 22px;display:flex;align-items:center;gap:18px}.bar a{color:#171717;font-weight:700}.wrap{max-width:1100px;margin:28px auto;padding:0 16px}.panel{background:#242424;border:1px solid #444;border-radius:8px;padding:20px}.toolbar{display:flex;justify-content:space-between;align-items:center}.user{border-top:1px solid #444;padding:14px 0;display:flex;justify-content:space-between;align-items:center;gap:18px}.user:first-child{border-top:0}.user-main{min-width:0;flex:1}.user-main b{font-size:16px}.user-meta{margin-top:5px;line-height:1.6}.user-actions{display:flex;align-items:center;justify-content:flex-end;gap:7px;flex-wrap:wrap}.user-actions select{font:inherit;min-width:100px;padding:8px;border:1px solid #555;border-radius:5px;background:#111;color:#fff}.user-actions button{white-space:nowrap}button{font:inherit;padding:9px 12px;border:0;border-radius:5px;background:#d9a441;color:#171717;cursor:pointer}.danger{background:#c85555;color:#fff}.muted{color:#aaa}.status-ban{color:#ff9b9b}.status-ok{color:#8fd7a5}
+    @media(max-width:760px){.user{align-items:stretch;flex-direction:column;gap:10px}.user-actions{justify-content:flex-start}.user-actions select,.user-actions button{flex:1 1 0;min-width:0}}
   </style>
 </head>
 <body>
@@ -20,14 +21,49 @@
       if (!response.ok) throw Error(data.error || '请求失败');
       return data;
     }
+    function esc(value) {
+      return String(value ?? '').replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]));
+    }
+    function date(value) {
+      if (!value) return '未知';
+      const parsed = new Date(value);
+      return Number.isNaN(parsed.getTime()) ? esc(value) : esc(parsed.toLocaleString());
+    }
+    function banDate(value) {
+      if (!value) return '';
+      return String(value).startsWith('9999-') ? '永久' : date(value);
+    }
+    async function setBan(button, action) {
+      const row = button.closest('.user');
+      const method = row.querySelector('.ban-method').value;
+      const duration = row.querySelector('.ban-duration').value;
+      const username = row.dataset.username || '该用户';
+      const target = method === 'ip' ? `IP ${row.dataset.ip || '未知'}` : `账号 ${username}`;
+      if (action === 'ban' && !confirm(`确定要封禁${target}吗？\n封禁时长：${duration === 'permanent' ? '永久' : duration}`)) return;
+      if (action === 'unban' && !confirm(`确定解除${target}的封禁吗？`)) return;
+      button.disabled = true;
+      try {
+        await api(`/api/admin/users/${encodeURIComponent(row.dataset.id)}/ban`, { method: 'POST', body: JSON.stringify({ action, method, duration }) });
+        await load();
+      } catch (error) {
+        $('state').textContent = error.message;
+        button.disabled = false;
+      }
+    }
     async function load() {
       try {
         const me = await api('/api/auth/me');
         if (me.user?.role !== 'admin') throw Error('当前账号不是管理员');
         const data = await api('/api/admin/users');
         $('state').textContent = `共 ${data.users.length} 个账号`;
-        $('list').innerHTML = data.users.map(user => `<div class="user"><span><b>${user.username}</b>　<small>${user.role}</small></span><button data-id="${user.id}" data-role="${user.role === 'admin' ? 'user' : 'admin'}">设为${user.role === 'admin' ? '普通用户' : '管理员'}</button></div>`).join('');
-        $('list').querySelectorAll('button').forEach(button => button.onclick = async () => { button.disabled = true; button.textContent = '处理中…'; try { await api(`/api/admin/users/${button.dataset.id}/role`, { method: 'POST', body: JSON.stringify({ role: button.dataset.role }) }); await load(); } catch (error) { button.disabled = false; button.textContent = '重试'; $('state').textContent = error.message; } });
+        $('list').innerHTML = data.users.map(user => {
+          const accountStatus = user.account_banned ? `<span class="status-ban">账号封禁至 ${banDate(user.ban_until)}</span>` : '<span class="status-ok">账号正常</span>';
+          const ipStatus = user.ip_banned ? `<span class="status-ban">IP 封禁至 ${banDate(user.ip_ban_until)}</span>` : '<span class="status-ok">IP 正常</span>';
+          return `<div class="user" data-id="${esc(user.id)}" data-username="${esc(user.username)}" data-ip="${esc(user.last_ip || '')}"><div class="user-main"><b>${esc(user.username)}</b>　<small>${esc(user.role)}</small><div class="user-meta muted">最近 IP：${esc(user.last_ip || '暂无记录')}<br>注册：${date(user.created_at)}　最后活动：${date(user.updated_at)}<br>${accountStatus}　${ipStatus}</div></div><div class="user-actions"><select class="ban-method" aria-label="封禁对象"><option value="account">账号</option><option value="ip">IP</option></select><select class="ban-duration" aria-label="封禁时长"><option value="30m">30 分钟</option><option value="12h">12 小时</option><option value="1d" selected>1 天</option><option value="7d">7 天</option><option value="30d">30 天</option><option value="permanent">永久</option></select><button class="ban danger" type="button">封禁</button><button class="unban" type="button">解除封禁</button><button class="role" type="button" data-role="${user.role === 'admin' ? 'user' : 'admin'}">设为${user.role === 'admin' ? '普通用户' : '管理员'}</button></div></div>`;
+        }).join('');
+        $('list').querySelectorAll('.ban').forEach(button => button.onclick = () => setBan(button, 'ban'));
+        $('list').querySelectorAll('.unban').forEach(button => button.onclick = () => setBan(button, 'unban'));
+        $('list').querySelectorAll('.role').forEach(button => button.onclick = async () => { const row = button.closest('.user'); button.disabled = true; try { await api(`/api/admin/users/${encodeURIComponent(row.dataset.id)}/role`, { method: 'POST', body: JSON.stringify({ role: button.dataset.role }) }); await load(); } catch (error) { button.disabled = false; $('state').textContent = error.message; } });
       } catch (error) { $('state').textContent = `${error.message}，请返回管理首页登录`; $('list').innerHTML = '<a href="/admin" style="color:#d9a441">返回管理首页</a>'; }
     }
     $('logout').onclick = async () => { await api('/api/auth/logout', { method: 'POST' }).catch(() => {}); localStorage.removeItem('arcadia_admin_token'); location.href = '/admin'; };
