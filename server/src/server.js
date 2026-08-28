@@ -16,6 +16,7 @@ const allowedOrigins = new Set((process.env.ALLOWED_ORIGINS || '').split(',').ma
 const trustProxy = process.env.TRUST_PROXY === 'true';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
 const SESSION_SECRET = process.env.SESSION_SECRET || ADMIN_PASSWORD || 'arcadia-item-workshop-session-secret';
+const SESSION_TTL_MS = parseInteger(process.env.SESSION_TTL_HOURS, 24 * 30, 1, 24 * 365) * 60 * 60 * 1000;
 const DEBUG_ERRORS = process.env.DEBUG_ERRORS === 'true';
 const sessions = new Map();
 const repository = createRepository(openDatabase(path.join(ROOT, 'data', 'workshop.sqlite')));
@@ -128,7 +129,7 @@ function authToken(req) {
   return header.startsWith('Bearer ') ? header.slice(7).trim() : cookieValue(req, 'arcadia_admin');
 }
 function issueSession(user) {
-  const payload = Buffer.from(JSON.stringify({ userId: user.id, expiry: Date.now() + 8 * 60 * 60 * 1000 })).toString('base64url');
+  const payload = Buffer.from(JSON.stringify({ userId: user.id, expiry: Date.now() + SESSION_TTL_MS })).toString('base64url');
   const signature = crypto.createHmac('sha256', SESSION_SECRET).update(payload).digest('base64url');
   const token = `${payload}.${signature}`;
   sessions.set(token, { userId: user.id, role: user.role, expiry: JSON.parse(Buffer.from(payload, 'base64url').toString()).expiry });

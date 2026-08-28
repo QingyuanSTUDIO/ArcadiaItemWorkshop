@@ -173,7 +173,7 @@
                   <select class="th-arcadia-mainline-sort"><option value="newest">更新时间：最新</option><option value="oldest">更新时间：最早</option></select>
                   <input class="th-arcadia-mainline-search" type="search" placeholder="搜索条目名或上传者">
                 </div>
-                <div class="th-arcadia-mainline-actions"><button class="th-arcadia-mainline-refresh" type="button">读取世界书本体</button><button class="th-arcadia-mainline-update" type="button" hidden>更新世界书本体</button><button class="th-arcadia-mainline-collapse-all" type="button">折叠全部</button></div>
+                <div class="th-arcadia-mainline-actions"><button class="th-arcadia-mainline-refresh" type="button">读取世界书本体</button><button class="th-arcadia-mainline-update" type="button" hidden>从主线更新本地</button><button class="th-arcadia-mainline-collapse-all" type="button">折叠全部</button></div>
                 <div class="th-arcadia-mainline-items"></div><div class="th-arcadia-mainline-pager"></div>
               </div>
             </details>
@@ -330,6 +330,7 @@
     #${ROOT_ID} .th-arcadia-entry-status-workshop-downloaded { background: #4d8dff; }
     #${ROOT_ID} .th-arcadia-entry-status-workshop-missing { background: #e05252; }
     #${ROOT_ID} .th-arcadia-entry-status-workshop-updated { background: #e5b84b; }
+    #${ROOT_ID} .th-arcadia-section-diff-dot { display: inline-block; width: 7px; height: 7px; margin-left: 7px; border-radius: 50%; background: #e05252; box-shadow: 0 0 0 1px #0008; vertical-align: middle; }
     #${ROOT_ID} .th-arcadia-entry-status-mainline-updated { background: #45c878; }
     #${ROOT_ID} .th-arcadia-entry-status-mainline-stale { background: #e5b84b; }
     #${ROOT_ID} .th-arcadia-network-download, #${ROOT_ID} .th-arcadia-network-like, #${ROOT_ID} .th-arcadia-network-report { border: 0; border-radius: 4px; padding: 6px 10px; color: #fff; cursor: pointer; }
@@ -571,6 +572,12 @@
   function sourceKey(name) { return String(name || '').trim().toLocaleLowerCase(); }
   function contentFingerprint(content) { return String(content || '').replace(/\s+/g, ' ').trim(); }
   function localEntriesWithName(name) { const key = sourceKey(name); return allWorldbookEntries.filter(entry => sourceKey(entry.name) === key); }
+  function taggedValue(content, tag) { return String(content || '').match(new RegExp(`<${tag}\\s*>([\\s\\S]*?)<\\/${tag}\\s*>`, 'i'))?.[1] || ''; }
+  function differingTags(item) {
+    const local = localEntriesWithName(item.name)[0];
+    if (!local) return new Set();
+    return new Set(TAG_DEFS.filter(([tag]) => contentFingerprint(taggedValue(local.content, tag)) !== contentFingerprint(taggedValue(item.content, tag))).map(([tag]) => tag));
+  }
   function workshopStatus(item) {
     const locals = localEntriesWithName(item.name);
     if (!locals.length) return ['workshop-missing', '未下载'];
@@ -842,7 +849,8 @@
       root.querySelectorAll('.th-arcadia-network-panel > .th-arcadia-settings-module').forEach(module => { module.open = false; });
       workshopOffset = 0;
       mainlineOffset = 0;
-      updateNetworkState(); refreshSourceIndex();
+      updateNetworkState();
+      validateStoredSession().then(valid => { if (valid) refreshSourceIndex(); });
     }
   }
   function updateNetworkState() {
@@ -859,6 +867,23 @@
     networkPass.value = '';
   }
   function networkHeaders() { return networkSession?.token ? { Authorization: `Bearer ${networkSession.token}` } : {}; }
+  async function validateStoredSession() {
+    if (!networkSession?.token || !networkSession.api) return false;
+    try {
+      const response = await fetch(`${networkSession.api}/api/auth/me`, { headers: networkHeaders() });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.user) throw new Error('登录状态已失效');
+      networkSession = { ...networkSession, username: data.user.username, role: data.user.role };
+      localStorage.setItem('th-arcadia-network-session', JSON.stringify(networkSession));
+      updateNetworkState();
+      return true;
+    } catch (_) {
+      networkSession = null;
+      localStorage.removeItem('th-arcadia-network-session');
+      updateNetworkState();
+      return false;
+    }
+  }
   function networkError(data, fallback) {
     return [data?.error || fallback, data?.detail, data?.requestId && `请求编号：${data.requestId}`].filter(Boolean).join(' | ');
   }
@@ -874,12 +899,12 @@
     const label = parentDocument.createElement('span'); label.className = 'th-arcadia-pager-label'; label.textContent = `(${page + 1}/${pages})`; container.append(label);
     container.append(make('›', Math.min(pages - 1, page + 1) * limit, page >= pages - 1), make('»', (pages - 1) * limit, page >= pages - 1));
   }
-  function workshopTaggedSections(content) {
+  function workshopTaggedSections(content, diffTags = new Set()) {
     const raw = String(content || '');
     const sections = TAG_DEFS.map(([tag, title]) => {
       const match = raw.match(new RegExp(`<${tag}\\s*>([\\s\\S]*?)<\\/${tag}\\s*>`, 'i'));
       if (!match) return '';
-      return `<details class="th-arcadia-workshop-section"><summary>${escapeHtml(title)}</summary><div>${escapeHtml(match[1].trim() || '(空)')}</div></details>`;
+      return `<details class="th-arcadia-workshop-section"><summary>${escapeHtml(title)}${diffTags.has(tag) ? '<span class="th-arcadia-section-diff-dot" title="此部分与本地内容不同"></span>' : ''}</summary><div>${escapeHtml(match[1].trim() || '(空)')}</div></details>`;
     }).filter(Boolean);
     return sections.length ? sections.join('') : `<div class="th-arcadia-network-item-body">${escapeHtml(raw || '(此条目没有内容)')}</div>`;
   }
@@ -956,7 +981,7 @@
     try {
       const params = new URLSearchParams({ category: workshopCategory.value, sort: workshopSort.value, q: workshopSearch.value.trim(), offset: String(workshopOffset) });
       const r = await fetch(`${networkSession.api}/api/worldbook/workshop?${params}`, { headers: networkHeaders() }); const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(networkError(d, '读取失败'));
-      networkItems.innerHTML = d.items?.length ? d.items.map((item, index) => { const [state, title] = workshopStatus(item); const needsUpdate = state === 'workshop-updated'; return `<details class="th-arcadia-network-item" data-index="${index}"><summary><span class="th-arcadia-entry-status-dot th-arcadia-entry-status-${state}" title="${title}"></span><span class="th-arcadia-network-item-title">${escapeHtml(item.name || '未命名条目')}</span><span class="th-arcadia-network-item-author">上传者：${escapeHtml(item.authorName || '未知')}</span><span class="th-arcadia-network-item-stats">下载 ${item.downloadCount || 0} · 赞 ${item.likeCount || 0} · 举报 ${item.reportCount || 0}</span><button type="button" class="th-arcadia-network-collapse-item">折叠本栏目</button><span class="th-arcadia-network-item-actions"><button type="button" class="th-arcadia-network-download${needsUpdate ? ' th-arcadia-network-update' : ''}">${needsUpdate ? '更新' : '下载'}</button><button type="button" class="th-arcadia-network-like">赞</button><button type="button" class="th-arcadia-network-report">踩</button></span></summary><div class="th-arcadia-network-item-body"><div class="th-arcadia-workshop-sections">${workshopTaggedSections(item.content)}</div></div></details>`; }).join('') : '<div class="th-arcadia-settings-hint">没有符合条件的条目</div>';
+      networkItems.innerHTML = d.items?.length ? d.items.map((item, index) => { const [state, title] = workshopStatus(item); const needsUpdate = state === 'workshop-updated'; return `<details class="th-arcadia-network-item" data-index="${index}"><summary><span class="th-arcadia-entry-status-dot th-arcadia-entry-status-${state}" title="${title}"></span><span class="th-arcadia-network-item-title">${escapeHtml(item.name || '未命名条目')}</span><span class="th-arcadia-network-item-author">上传者：${escapeHtml(item.authorName || '未知')}</span><span class="th-arcadia-network-item-stats">下载 ${item.downloadCount || 0} · 赞 ${item.likeCount || 0} · 举报 ${item.reportCount || 0}</span><button type="button" class="th-arcadia-network-collapse-item">折叠本栏目</button><span class="th-arcadia-network-item-actions"><button type="button" class="th-arcadia-network-download${needsUpdate ? ' th-arcadia-network-update' : ''}">${needsUpdate ? '更新' : '下载'}</button><button type="button" class="th-arcadia-network-like">赞</button><button type="button" class="th-arcadia-network-report">踩</button></span></summary><div class="th-arcadia-network-item-body"><div class="th-arcadia-workshop-sections">${workshopTaggedSections(item.content, differingTags(item))}</div></div></details>`; }).join('') : '<div class="th-arcadia-settings-hint">没有符合条件的条目</div>';
       networkItems.querySelectorAll('.th-arcadia-workshop-section').forEach(section => { section.open = false; });
       networkItems.querySelectorAll('.th-arcadia-network-collapse-item').forEach(button => button.addEventListener('click', event => { event.preventDefault(); event.stopPropagation(); button.closest('.th-arcadia-network-item')?.querySelectorAll('.th-arcadia-workshop-section').forEach(section => { section.open = false; }); }));
       networkItems.querySelectorAll('.th-arcadia-network-download').forEach(button => button.addEventListener('click', event => { event.preventDefault(); event.stopPropagation(); downloadWorkshopItem(d.items[Number(button.closest('.th-arcadia-network-item')?.dataset.index)], button.classList.contains('th-arcadia-network-update')); }));
@@ -972,24 +997,45 @@
       const response = await fetch(`${networkSession.api}/api/worldbook?${params}`, { headers: networkHeaders() });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(networkError(data, '读取失败'));
-      mainlineItems.innerHTML = data.items?.length ? data.items.map((item, index) => { const [state, title] = mainlineStatus(item); return `<details class="th-arcadia-network-item" data-index="${index}"><summary><span class="th-arcadia-entry-status-dot th-arcadia-entry-status-${state}" title="${title}"></span><span class="th-arcadia-network-item-title">${escapeHtml(item.name || '未命名条目')}</span><span class="th-arcadia-network-item-author">上传者：${escapeHtml(item.authorName || '管理员')}</span><span class="th-arcadia-network-item-stats">${item.updatedAt ? escapeHtml(new Date(item.updatedAt).toLocaleDateString()) : ''}</span></summary><div class="th-arcadia-network-item-body"><div class="th-arcadia-workshop-sections">${workshopTaggedSections(item.content)}</div></div></details>`; }).join('') : '<div class="th-arcadia-settings-hint">没有符合条件的条目</div>';
+      mainlineItems.innerHTML = data.items?.length ? data.items.map((item, index) => { const [state, title] = mainlineStatus(item); return `<details class="th-arcadia-network-item" data-index="${index}"><summary><span class="th-arcadia-entry-status-dot th-arcadia-entry-status-${state}" title="${title}"></span><span class="th-arcadia-network-item-title">${escapeHtml(item.name || '未命名条目')}</span><span class="th-arcadia-network-item-author">上传者：${escapeHtml(item.authorName || '管理员')}</span><span class="th-arcadia-network-item-stats">${item.updatedAt ? escapeHtml(new Date(item.updatedAt).toLocaleDateString()) : ''}</span></summary><div class="th-arcadia-network-item-body"><div class="th-arcadia-workshop-sections">${workshopTaggedSections(item.content, differingTags(item))}</div></div></details>`; }).join('') : '<div class="th-arcadia-settings-hint">没有符合条件的条目</div>';
       mainlineItems.querySelectorAll('.th-arcadia-workshop-section').forEach(section => { section.open = false; });
       renderPager(mainlinePager, data.total || 0, mainlineOffset, offset => { mainlineOffset = offset; networkLoadMainline(); });
       setStatus(`已读取 ${data.items?.length || 0} 个世界书本体条目`);
     } catch (error) { setStatus(`读取世界书本体失败：${error.message}`); }
   }
   async function updateMainlineWorldbook() {
-    if (networkSession?.role !== 'admin' || !entries.length) { setStatus('仅管理员可以更新世界书本体'); return; }
-    if (!parentWindow.confirm(`您确定要更新主线世界书中的全部 ${entries.length} 个条目吗？`)) return;
+    if (networkSession?.role !== 'admin' || !currentWorldBookName) { setStatus('仅管理员可以从主线更新本地世界书'); return; }
+    if (!parentWindow.confirm('您确定要从服务器主线世界书更新本地世界书吗？\n\n只会读取主线条目，不会上传创意工坊条目。')) return;
     try {
-      let success = 0;
-      for (const entry of entries) {
-        const response = await fetch(`${networkSession.api}/api/worldbook`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...networkHeaders() }, body: JSON.stringify({ id: `tavern-${currentWorldBookName}-${entry.uid}`, worldbookName: currentWorldBookName, uid: String(entry.uid), name: entry.name || '', category: getCategory(entry), content: entry.content || '', strategy: entry.strategy || {}, position: entry.position || {}, enabled: entry.enabled !== false }) });
-        if (!response.ok) { const data = await response.json().catch(() => ({})); throw new Error(networkError(data, `同步“${entry.name}”失败`)); }
-        success += 1;
+      const remote = [];
+      let offset = 0;
+      let total = 0;
+      do {
+        const response = await fetch(`${networkSession.api}/api/worldbook?offset=${offset}`, { headers: networkHeaders() });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(networkError(data, '读取主线世界书失败'));
+        remote.push(...(data.items || []));
+        total = Number(data.total) || remote.length;
+        offset += Number(data.limit) || 10;
+      } while (offset < total);
+      const updates = new Map(remote.map(item => [sourceKey(item.name), item]));
+      const localUpdates = allWorldbookEntries.map(entry => {
+        const item = updates.get(sourceKey(entry.name));
+        return item ? { ...entry, content: item.content || '', strategy: item.strategy || { type: 'selective', keys: [] }, position: item.position || { type: 'after_character_definition', order: 100 }, enabled: item.enabled !== false } : entry;
+      });
+      const existingKeys = new Set(allWorldbookEntries.map(entry => sourceKey(entry.name)));
+      const missing = remote.filter(item => !existingKeys.has(sourceKey(item.name))).map(item => ({ name: item.name, content: item.content || '', strategy: item.strategy || { type: 'selective', keys: [] }, position: item.position || { type: 'after_character_definition', order: 100 }, enabled: item.enabled !== false }));
+      let updated = localUpdates;
+      if (parentWindow.TavernHelper?.updateWorldbookWith) updated = await parentWindow.TavernHelper.updateWorldbookWith(currentWorldBookName, () => localUpdates);
+      if (missing.length && parentWindow.TavernHelper?.createWorldbookEntries) {
+        const result = await parentWindow.TavernHelper.createWorldbookEntries(currentWorldBookName, missing);
+        updated = result.worldbook || updated;
       }
+      allWorldbookEntries = updated;
+      entries = pickProductEntries(updated);
+      renderList();
       await networkLoadMainline();
-      setStatus(`已更新 ${success} 个世界书本体条目`);
+      setStatus(`已从主线更新本地世界书 ${remote.length} 个条目`);
     } catch (error) { setStatus(`更新世界书本体失败：${error.message}`); }
   }
 
