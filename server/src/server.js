@@ -319,9 +319,11 @@ const server = http.createServer(async (req, res) => {
         return send(req, res, 201, { item: entry });
       }
       if (req.method === 'DELETE' && parts.length === 4) {
-        const existing = repository.getWorldbookEntry(parts[3]);
-        if (!existing || (module === 'workshop' && existing.authorId !== user.id && !isAdminUser(user))) return send(req, res, 404, { error: '条目不存在或无权限' });
-        return send(req, res, 200, { ok: repository.deleteWorldbookEntry(parts[3]) });
+        const id = decodePathPart(parts[3]);
+        const existing = repository.getWorldbookEntry(id);
+        if (!existing) return send(req, res, 404, { error: '条目不存在' });
+        if (module === 'workshop' && existing.authorId !== user.id && !isAdminUser(user)) return send(req, res, 403, { error: '只能删除自己上传的创意工坊条目' });
+        return send(req, res, 200, { ok: repository.deleteWorldbookEntry(id) });
       }
     }
     if (req.method === 'GET' && url.pathname === '/api/health') {
