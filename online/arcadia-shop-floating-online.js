@@ -88,9 +88,9 @@
             <div class="th-arcadia-sections"></div>
           </div>
           <div class="th-arcadia-editor" hidden>
+            <label class="th-arcadia-editor-field">条目名称<div class="th-arcadia-editor-name-row"><input class="th-arcadia-editor-name" type="text" readonly><button class="th-arcadia-rename" type="button">重命名</button></div></label>
             <label class="th-arcadia-editor-field">AI 提示词<textarea class="th-arcadia-ai-prompt" rows="3" placeholder="例如：帮我设计一把适合新手使用的激光手枪"></textarea></label>
             <button class="th-arcadia-ai-write" type="button">使用 AI 帮写</button>
-            <label class="th-arcadia-editor-field">条目名称<input class="th-arcadia-editor-name" type="text"></label>
             <label class="th-arcadia-editor-field">顺序<input class="th-arcadia-editor-order" type="number" step="1"></label>
             <label class="th-arcadia-editor-field">触发策略<select class="th-arcadia-editor-strategy"><option value="selective">绿灯（关键词触发）</option><option value="constant">蓝灯（始终启用）</option></select></label>
             <label class="th-arcadia-editor-field">插入位置<select class="th-arcadia-editor-position"><option value="after_character_definition">角色定义后</option><option value="before_character_definition">角色定义前</option><option value="after_example_messages">示例消息后</option><option value="before_example_messages">示例消息前</option><option value="after_author_note">作者注释后</option><option value="before_author_note">作者注释前</option><option value="at_depth">指定深度</option><option value="outlet">Outlet</option></select></label>
@@ -175,6 +175,18 @@
                 </div>
                 <div class="th-arcadia-mainline-actions"><button class="th-arcadia-mainline-refresh" type="button">读取世界书本体</button><button class="th-arcadia-mainline-update" type="button" hidden>从主线更新本地</button><button class="th-arcadia-mainline-collapse-all" type="button">折叠全部</button></div>
                 <div class="th-arcadia-mainline-items"></div><div class="th-arcadia-mainline-pager"></div>
+              </div>
+            </details>
+            <details class="th-arcadia-settings-module th-arcadia-mine-module">
+              <summary>我的创意工坊</summary>
+              <div class="th-arcadia-settings-module-body">
+                <div class="th-arcadia-workshop-filters">
+                  <select class="th-arcadia-mine-category"><option value="">全部分类</option><option>商品</option><option>综合商品</option><option>生物</option><option>药品</option><option>改造</option><option>特殊改造</option><option>装备</option><option>武器</option></select>
+                  <select class="th-arcadia-mine-sort"><option value="newest">上传时间：最新</option><option value="oldest">上传时间：最早</option><option value="downloads_desc">下载量：从高到低</option><option value="downloads_asc">下载量：从低到高</option><option value="likes_desc">点赞量：从高到低</option><option value="likes_asc">点赞量：从低到高</option></select>
+                  <input class="th-arcadia-mine-search" type="search" placeholder="搜索我的条目">
+                </div>
+                <div class="th-arcadia-mine-actions"><button class="th-arcadia-mine-refresh" type="button">读取我的条目</button><button class="th-arcadia-mine-collapse-all" type="button">折叠全部</button></div>
+                <div class="th-arcadia-mine-items"></div><div class="th-arcadia-mine-pager"></div>
               </div>
             </details>
           </div>
@@ -303,6 +315,10 @@
     #${ROOT_ID} .th-arcadia-mainline-actions { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
     #${ROOT_ID} .th-arcadia-mainline-actions button { border: 0; border-radius: 4px; padding: 7px 9px; background: #e89424; color: #fff; cursor: pointer; }
     #${ROOT_ID} .th-arcadia-mainline-actions button:hover { filter: brightness(1.12); }
+    #${ROOT_ID} .th-arcadia-mine-actions { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
+    #${ROOT_ID} .th-arcadia-mine-actions button { border: 0; border-radius: 4px; padding: 7px 9px; background: #e89424; color: #fff; cursor: pointer; }
+    #${ROOT_ID} .th-arcadia-mine-delete { flex: 0 0 auto; border: 0; border-radius: 4px; padding: 6px 10px; background: #c94343; color: #fff; cursor: pointer; }
+    #${ROOT_ID} .th-arcadia-mine-delete:hover { background: #e05757; }
     #${ROOT_ID} .th-arcadia-network-auth-row button, #${ROOT_ID} .th-arcadia-network-actions button { border: 0; border-radius: 4px; padding: 7px 9px; background: #e89424; color: #fff; cursor: pointer; }
     #${ROOT_ID} .th-arcadia-network-items { display: grid; gap: 5px; margin-top: 8px; }
     #${ROOT_ID} .th-arcadia-pager { display: flex; align-items: center; justify-content: center; gap: 4px; margin-top: 8px; }
@@ -337,6 +353,10 @@
     #${ROOT_ID} .th-arcadia-network-download:hover { background: #3bbd7d; }
     #${ROOT_ID} .th-arcadia-network-download { background: #2f9e68; }
     #${ROOT_ID} .th-arcadia-network-update { background: #d9a441; color: #171717; }
+    #${ROOT_ID} .th-arcadia-editor-name-row { display: flex; gap: 8px; align-items: center; }
+    #${ROOT_ID} .th-arcadia-editor-name-row .th-arcadia-editor-name[readonly] { font-size: 1.15em; font-weight: 700; color: #fff; cursor: default; }
+    #${ROOT_ID} .th-arcadia-editor-name-row .th-arcadia-rename { flex: 0 0 auto; white-space: nowrap; border: 0; border-radius: 4px; padding: 8px 10px; background: var(--SmartThemeQuoteColor, #555); color: inherit; cursor: pointer; }
+    #${ROOT_ID} .th-arcadia-editor-name-row .th-arcadia-rename:hover { filter: brightness(1.12); }
     #${ROOT_ID} .th-arcadia-network-like { background: #2f9e68; }
     #${ROOT_ID} .th-arcadia-network-like:hover { background: #3bbd7d; }
     #${ROOT_ID} .th-arcadia-network-report { background: #c94343; }
@@ -442,6 +462,7 @@
   const settingsPanel = root.querySelector('.th-arcadia-settings');
   const aiPrompt = root.querySelector('.th-arcadia-ai-prompt');
   const aiWriteButton = root.querySelector('.th-arcadia-ai-write');
+  const renameButton = root.querySelector('.th-arcadia-rename');
   const aiSource = root.querySelector('.th-arcadia-ai-source');
   const aiSystemPrompt = root.querySelector('.th-arcadia-ai-system-prompt');
   const aiEndpoint = root.querySelector('.th-arcadia-ai-endpoint');
@@ -474,10 +495,18 @@
   const workshopSort = root.querySelector('.th-arcadia-workshop-sort');
   const workshopSearch = root.querySelector('.th-arcadia-workshop-search');
   const uploadMainlineButton = root.querySelector('.th-arcadia-upload-mainline');
+  const mineCategory = root.querySelector('.th-arcadia-mine-category');
+  const mineSort = root.querySelector('.th-arcadia-mine-sort');
+  const mineSearch = root.querySelector('.th-arcadia-mine-search');
+  const mineItems = root.querySelector('.th-arcadia-mine-items');
+  const minePager = root.querySelector('.th-arcadia-mine-pager');
+  const mineRefresh = root.querySelector('.th-arcadia-mine-refresh');
+  const mineCollapseAll = root.querySelector('.th-arcadia-mine-collapse-all');
   let uploadInProgress = false;
   let refreshingAll = false;
   let workshopOffset = 0;
   let mainlineOffset = 0;
+  let mineOffset = 0;
   let networkSession = null;
   try { networkSession = JSON.parse(localStorage.getItem('th-arcadia-network-session') || 'null'); } catch (_) {}
   networkUser.value = networkSession?.username || '';
@@ -849,8 +878,9 @@
       root.querySelectorAll('.th-arcadia-network-panel > .th-arcadia-settings-module').forEach(module => { module.open = false; });
       workshopOffset = 0;
       mainlineOffset = 0;
+      mineOffset = 0;
       updateNetworkState();
-      validateStoredSession().then(valid => { if (valid) refreshSourceIndex(); });
+      validateStoredSession().then(valid => { if (valid) { refreshSourceIndex(); networkLoadMine(); } });
     }
   }
   function updateNetworkState() {
@@ -867,7 +897,13 @@
     networkPass.value = '';
   }
   function networkHeaders() { return networkSession?.token ? { Authorization: `Bearer ${networkSession.token}` } : {}; }
-  async function validateStoredSession() {
+  function clearStoredSession(message = '您的登录信息已失效，请重新登录') {
+    networkSession = null;
+    localStorage.removeItem('th-arcadia-network-session');
+    updateNetworkState();
+    setStatus(message);
+  }
+  async function validateStoredSession({ notify = false } = {}) {
     if (!networkSession?.token || !networkSession.api) return false;
     try {
       const response = await fetch(`${networkSession.api}/api/auth/me`, { headers: networkHeaders() });
@@ -878,9 +914,7 @@
       updateNetworkState();
       return true;
     } catch (_) {
-      networkSession = null;
-      localStorage.removeItem('th-arcadia-network-session');
-      updateNetworkState();
+      clearStoredSession(notify ? '您的登录信息已失效，请重新登录' : '登录状态已失效，请重新登录');
       return false;
     }
   }
@@ -1003,6 +1037,29 @@
       setStatus(`已读取 ${data.items?.length || 0} 个世界书本体条目`);
     } catch (error) { setStatus(`读取世界书本体失败：${error.message}`); }
   }
+  async function networkLoadMine() {
+    if (!networkSession?.token) return;
+    try {
+      const params = new URLSearchParams({ mine: '1', category: mineCategory.value, sort: mineSort.value, q: mineSearch.value.trim(), offset: String(mineOffset) });
+      const response = await fetch(`${networkSession.api}/api/worldbook/workshop?${params}`, { headers: networkHeaders() });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(networkError(data, '读取我的创意工坊失败'));
+      mineItems.innerHTML = data.items?.length ? data.items.map((item, index) => `<details class="th-arcadia-network-item" data-index="${index}"><summary><span class="th-arcadia-network-item-title">${escapeHtml(item.name || '未命名条目')}</span><span class="th-arcadia-network-item-author">上传者：${escapeHtml(item.authorName || networkSession.username)}</span><span class="th-arcadia-network-item-stats">更新 ${item.updatedAt ? escapeHtml(new Date(item.updatedAt).toLocaleDateString()) : ''}</span><button type="button" class="th-arcadia-mine-delete">删除</button></summary><div class="th-arcadia-network-item-body"><div class="th-arcadia-workshop-sections">${workshopTaggedSections(item.content)}</div></div></details>`).join('') : '<div class="th-arcadia-settings-hint">暂无自己上传的创意工坊条目</div>';
+      mineItems.querySelectorAll('.th-arcadia-mine-delete').forEach(button => button.addEventListener('click', async event => {
+        event.preventDefault(); event.stopPropagation();
+        const item = data.items[Number(button.closest('.th-arcadia-network-item')?.dataset.index)];
+        if (!item || !parentWindow.confirm(`真的要删除“${item.name}”吗？此操作不可撤销。`)) return;
+        try {
+          const result = await fetch(`${networkSession.api}/api/worldbook/workshop/${encodeURIComponent(item.id)}`, { method: 'DELETE', headers: networkHeaders() });
+          const body = await result.json().catch(() => ({}));
+          if (!result.ok) throw new Error(networkError(body, '删除失败'));
+          setStatus(`已删除：${item.name}`); networkLoadMine();
+        } catch (error) { setStatus(`删除失败：${error.message}`); }
+      }));
+      mineItems.querySelectorAll('.th-arcadia-workshop-section').forEach(section => { section.open = false; });
+      renderPager(minePager, data.total || 0, mineOffset, offset => { mineOffset = offset; networkLoadMine(); });
+    } catch (error) { setStatus(`读取我的创意工坊失败：${error.message}`); }
+  }
   async function updateMainlineWorldbook() {
     if (networkSession?.role !== 'admin' || !currentWorldBookName) { setStatus('仅管理员可以从主线更新本地世界书'); return; }
     if (!parentWindow.confirm('您确定要从服务器主线世界书更新本地世界书吗？\n\n只会读取主线条目，不会上传创意工坊条目。')) return;
@@ -1048,6 +1105,7 @@
       // 这样主页面、创意工坊、世界书本体的状态点会一次性更新。
       await loadEntries();
       if (networkSession?.token) {
+        if (!await validateStoredSession({ notify: true })) return;
         await refreshSourceIndex();
         await Promise.all([networkLoadWorkshop(), networkLoadMainline()]);
       }
@@ -1340,7 +1398,18 @@
   mainlineCategory.addEventListener('change', () => { mainlineOffset = 0; networkLoadMainline(); });
   mainlineSort.addEventListener('change', () => { mainlineOffset = 0; networkLoadMainline(); });
   mainlineSearch.addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); mainlineOffset = 0; networkLoadMainline(); } });
+  mineRefresh.addEventListener('click', networkLoadMine);
+  mineCategory.addEventListener('change', () => { mineOffset = 0; networkLoadMine(); });
+  mineSort.addEventListener('change', () => { mineOffset = 0; networkLoadMine(); });
+  mineSearch.addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); mineOffset = 0; networkLoadMine(); } });
+  mineCollapseAll.addEventListener('click', () => mineItems.querySelectorAll('details').forEach(section => { section.open = false; }));
   aiWriteButton.addEventListener('click', aiWrite);
+  renameButton.addEventListener('click', () => {
+    const editing = editorName.readOnly;
+    editorName.readOnly = !editing;
+    renameButton.textContent = editing ? '完成重命名' : '重命名';
+    if (editing) { editorName.focus(); editorName.select(); }
+  });
   root.querySelector('.th-arcadia-mode-run').addEventListener('click', () => setEditMode(false));
   root.querySelector('.th-arcadia-mode-edit').addEventListener('click', () => setEditMode(true));
   root.querySelector('.th-arcadia-save').addEventListener('click', saveEntry);
@@ -1358,6 +1427,8 @@
   let startTop = 0;
   let dragStartLeft = 0;
   let dragStartTop = 0;
+  let headerPointerId = null;
+  let headerMoved = false;
   // 参考移动端悬浮球的默认坐标：手机右下方预留 120px，桌面端左上区域。
   // 当前拖动系统使用 right/bottom，因此在启动时做一次坐标换算。
   try {
@@ -1432,7 +1503,11 @@
   // 窗口标题栏也允许拖动，但拖动后会重新以窗口位置同步悬浮球。
   header.addEventListener('pointerdown', event => {
     if (event.target.closest('button')) return;
+    event.preventDefault();
+    event.stopPropagation();
     dragging = true;
+    headerMoved = false;
+    headerPointerId = event.pointerId;
     header.setPointerCapture(event.pointerId);
     startX = event.clientX;
     startY = event.clientY;
@@ -1440,16 +1515,39 @@
     dragStartTop = parseFloat(root.style.top) || 0;
   });
   header.addEventListener('pointermove', event => {
-    if (!dragging) return;
-    startLeft = Math.max(4, Math.min(parentWindow.innerWidth - orb.offsetWidth - 4, dragStartLeft + (event.clientX - startX)));
-    startTop = Math.max(4, Math.min(parentWindow.innerHeight - orb.offsetHeight - 4, dragStartTop + (event.clientY - startY)));
+    if (!dragging || event.pointerId !== headerPointerId) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const dx = event.clientX - startX;
+    const dy = event.clientY - startY;
+    if (Math.abs(dx) + Math.abs(dy) > 4) headerMoved = true;
+    startLeft = Math.max(4, Math.min(parentWindow.innerWidth - orb.offsetWidth - 4, dragStartLeft + dx));
+    startTop = Math.max(4, Math.min(parentWindow.innerHeight - orb.offsetHeight - 4, dragStartTop + dy));
     root.style.left = `${startLeft}px`;
     root.style.top = `${startTop}px`;
   });
-  header.addEventListener('pointerup', () => {
+  header.addEventListener('pointerup', event => {
+    if (event.pointerId !== headerPointerId) return;
+    event.preventDefault();
+    event.stopPropagation();
     dragging = false;
+    headerPointerId = null;
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ left: `${startLeft}px`, top: `${startTop}px` }));
   });
+  header.addEventListener('pointercancel', event => {
+    if (event.pointerId !== headerPointerId) return;
+    event.preventDefault();
+    event.stopPropagation();
+    dragging = false;
+    headerPointerId = null;
+  });
+  header.addEventListener('click', event => {
+    if (headerMoved) {
+      event.preventDefault();
+      event.stopPropagation();
+      headerMoved = false;
+    }
+  }, true);
 
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null');

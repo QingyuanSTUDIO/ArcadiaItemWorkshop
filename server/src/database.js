@@ -137,11 +137,11 @@ export function createRepository(db, reportLimit = 5) {
         ON CONFLICT(module,worldbook_name,uid) DO UPDATE SET name=excluded.name,content=excluded.content,category=excluded.category,strategy_json=excluded.strategy_json,position_json=excluded.position_json,enabled=excluded.enabled,author_id=COALESCE(excluded.author_id,worldbook_entries.author_id),updated_at=excluded.updated_at`).run(entry);
       return entryRow(db.prepare('SELECT e.*, u.username AS author_name FROM worldbook_entries e LEFT JOIN users u ON u.id=e.author_id WHERE e.id = ?').get(entry.id) || db.prepare('SELECT e.*, u.username AS author_name FROM worldbook_entries e LEFT JOIN users u ON u.id=e.author_id WHERE e.module=? AND e.worldbook_name=? AND e.uid=?').get(entry.module, entry.worldbookName, entry.uid));
     },
-    listWorldbookEntries({ module, worldbookName = '', category = '', query = '', sort = 'newest' }) {
+    listWorldbookEntries({ module, worldbookName = '', category = '', query = '', sort = 'newest', authorId = '', includeReview = false }) {
       // 不依赖 SQLite JSON1 扩展；宝塔环境中的 SQLite 构建可能未启用该扩展。
       const actualModule = module === 'review' ? 'workshop' : module;
       const moderation = module === 'review' ? 'review' : 'published';
-      const rows = db.prepare("SELECT e.*, u.username AS author_name FROM worldbook_entries e LEFT JOIN users u ON u.id=e.author_id WHERE e.module = ? AND e.moderation_status = ? AND (? = '' OR e.worldbook_name = ?) AND (? = '' OR e.category = ?) AND (? = '' OR e.name LIKE ? OR COALESCE(u.username, '') LIKE ?) ORDER BY e.updated_at DESC").all(actualModule, moderation, worldbookName, worldbookName, category, category, query, `%${query}%`, `%${query}%`).map(entryRow);
+      const rows = db.prepare("SELECT e.*, u.username AS author_name FROM worldbook_entries e LEFT JOIN users u ON u.id=e.author_id WHERE e.module = ? AND (e.moderation_status = ? OR (? = 1 AND e.moderation_status = 'review')) AND (? = '' OR e.worldbook_name = ?) AND (? = '' OR e.category = ?) AND (? = '' OR e.name LIKE ? OR COALESCE(u.username, '') LIKE ?) AND (? = '' OR e.author_id = ?) ORDER BY e.updated_at DESC").all(actualModule, moderation, includeReview ? 1 : 0, worldbookName, worldbookName, category, category, query, `%${query}%`, `%${query}%`, authorId, authorId).map(entryRow);
       const compare = sort === 'oldest' ? (a, b) => a.createdAt.localeCompare(b.createdAt) : sort === 'downloads_desc' ? (a, b) => b.downloadCount - a.downloadCount : sort === 'downloads_asc' ? (a, b) => a.downloadCount - b.downloadCount : sort === 'likes_desc' ? (a, b) => b.likeCount - a.likeCount : sort === 'likes_asc' ? (a, b) => a.likeCount - b.likeCount : (a, b) => b.createdAt.localeCompare(a.createdAt);
       return rows.sort(compare);
     },

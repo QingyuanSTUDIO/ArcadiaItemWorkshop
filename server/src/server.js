@@ -284,7 +284,8 @@ const server = http.createServer(async (req, res) => {
       const module = url.pathname.startsWith('/api/worldbook/workshop') ? 'workshop' : 'worldbook';
       if (module === 'worldbook' && !isAdminUser(user)) return send(req, res, 403, { error: '世界书本体仅管理员可修改' });
       if (req.method === 'GET') {
-        const allItems = repository.listWorldbookEntries({ module, worldbookName: url.searchParams.get('worldbook') || '', category: url.searchParams.get('category') || '', query: (url.searchParams.get('q') || '').trim().slice(0, 100), sort: url.searchParams.get('sort') || 'newest' });
+        const mine = module === 'workshop' && url.searchParams.get('mine') === '1';
+        const allItems = repository.listWorldbookEntries({ module, worldbookName: url.searchParams.get('worldbook') || '', category: url.searchParams.get('category') || '', query: (url.searchParams.get('q') || '').trim().slice(0, 100), sort: url.searchParams.get('sort') || 'newest', authorId: mine ? user.id : '', includeReview: mine });
         const limit = 10;
         const offset = Math.max(0, Number.parseInt(url.searchParams.get('offset') || '0', 10) || 0);
         return send(req, res, 200, { total: allItems.length, limit, offset, items: allItems.slice(offset, offset + limit) });
