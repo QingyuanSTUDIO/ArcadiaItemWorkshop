@@ -941,7 +941,7 @@
     networkState.textContent = loggedIn ? `已登录：${networkSession.username}（${networkSession.role === 'admin' ? '管理员' : '用户'}）` : '未登录';
     networkActions.hidden = !loggedIn;
     uploadMainlineButton.hidden = !loggedIn || networkSession.role !== 'admin';
-    mainlineUpdate.hidden = !loggedIn || networkSession.role !== 'admin';
+    mainlineUpdate.hidden = !loggedIn;
     networkUser.hidden = loggedIn;
     networkPass.hidden = loggedIn;
     root.querySelector('.th-arcadia-network-login').hidden = loggedIn;
@@ -1137,7 +1137,8 @@
     } catch (error) { setStatus(`批量删除失败：${error.message}`); }
   }
   async function updateMainlineWorldbook() {
-    if (networkSession?.role !== 'admin' || !currentWorldBookName) { setStatus('仅管理员可以从主线更新本地世界书'); return; }
+    if (!networkSession?.token) { setStatus('请先在账户信息中登录'); return; }
+    if (!currentWorldBookName) { setStatus('请先读取本地世界书'); return; }
     if (!parentWindow.confirm('您确定要从服务器主线世界书更新本地世界书吗？\n\n只会读取主线条目，不会上传创意工坊条目。')) return;
     try {
       const remote = [];

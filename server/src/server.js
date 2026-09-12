@@ -358,7 +358,6 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname.startsWith('/api/worldbook')) {
       const user = requireUserWithBan(req, res); if (!user) return;
       const module = url.pathname.startsWith('/api/worldbook/workshop') ? 'workshop' : 'worldbook';
-      if (module === 'worldbook' && !isAdminUser(user)) return send(req, res, 403, { error: '世界书本体仅管理员可修改' });
       if (req.method === 'GET') {
         const mine = module === 'workshop' && url.searchParams.get('mine') === '1';
         const allItems = repository.listWorldbookEntries({ module, worldbookName: url.searchParams.get('worldbook') || '', category: url.searchParams.get('category') || '', query: (url.searchParams.get('q') || '').trim().slice(0, 100), sort: url.searchParams.get('sort') || 'newest', authorId: mine ? user.id : '', includeReview: mine });
@@ -378,6 +377,7 @@ const server = http.createServer(async (req, res) => {
         if (result.kind === 'duplicate') return send(req, res, 409, { error: parts[4] === 'like' ? '你已经赞过这个条目' : '你已经踩过这个条目' });
         return send(req, res, 200, { item: result.item });
       }
+      if (module === 'worldbook' && !isAdminUser(user)) return send(req, res, 403, { error: '世界书本体仅管理员可修改' });
       if (req.method === 'POST') {
         const body = await readBody(req); const now = new Date().toISOString();
         if (body.id) {
