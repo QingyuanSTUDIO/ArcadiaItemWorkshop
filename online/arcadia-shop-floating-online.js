@@ -173,7 +173,7 @@
                   <select class="th-arcadia-mainline-sort"><option value="newest">更新时间：最新</option><option value="oldest">更新时间：最早</option></select>
                   <input class="th-arcadia-mainline-search" type="search" placeholder="搜索条目名或上传者">
                 </div>
-                <div class="th-arcadia-mainline-actions"><button class="th-arcadia-mainline-refresh" type="button">读取世界书本体</button><button class="th-arcadia-mainline-update" type="button" hidden>从主线更新本地</button><button class="th-arcadia-mainline-collapse-all" type="button">折叠全部</button></div>
+                <div class="th-arcadia-mainline-actions"><button class="th-arcadia-mainline-refresh" type="button">读取世界书本体</button><button class="th-arcadia-mainline-update" type="button">从主线更新本地</button><button class="th-arcadia-mainline-collapse-all" type="button">折叠全部</button></div>
                 <div class="th-arcadia-mainline-items"></div><div class="th-arcadia-mainline-pager"></div>
               </div>
             </details>
@@ -526,6 +526,7 @@
   let refreshingAll = false;
   let workshopOffset = 0;
   let mainlineOffset = 0;
+  let mainlineCache = [];
   let mineOffset = 0;
   let downloadedOffset = 0;
   let networkSession = null;
@@ -941,7 +942,7 @@
     networkState.textContent = loggedIn ? `已登录：${networkSession.username}（${networkSession.role === 'admin' ? '管理员' : '用户'}）` : '未登录';
     networkActions.hidden = !loggedIn;
     uploadMainlineButton.hidden = !loggedIn || networkSession.role !== 'admin';
-    mainlineUpdate.hidden = !loggedIn;
+    mainlineUpdate.toggleAttribute('hidden', !loggedIn);
     networkUser.hidden = loggedIn;
     networkPass.hidden = loggedIn;
     root.querySelector('.th-arcadia-network-login').hidden = loggedIn;
@@ -1077,17 +1078,35 @@
       setStatus(`已读取 ${d.items?.length || 0} 个创意工坊条目`);
     } catch (error) { setStatus(`读取失败：${error.message}`); }
   }
+  function renderMainlinePage() {
+    const pageItems = mainlineCache.slice(mainlineOffset, mainlineOffset + 10);
+    mainlineItems.innerHTML = pageItems.length ? pageItems.map((item, index) => { const [state, title] = mainlineStatus(item); return `<details class="th-arcadia-network-item" data-index="${index}"><summary><span class="th-arcadia-entry-status-dot th-arcadia-entry-status-${state}" title="${title}"></span><span class="th-arcadia-network-item-title">${escapeHtml(item.name || '未命名条目')}</span><span class="th-arcadia-network-item-author">上传者：${escapeHtml(item.authorName || '管理员')}</span><span class="th-arcadia-network-item-stats">${item.updatedAt ? escapeHtml(new Date(item.updatedAt).toLocaleDateString()) : ''}</span></summary><div class="th-arcadia-network-item-body"><div class="th-arcadia-workshop-sections">${workshopTaggedSections(item.content, differingTags(item))}</div></div></details>`; }).join('') : '<div class="th-arcadia-settings-hint">没有符合条件的条目</div>';
+    mainlineItems.querySelectorAll('.th-arcadia-workshop-section').forEach(section => { section.open = false; });
+    renderPager(mainlinePager, mainlineCache.length, mainlineOffset, offset => { mainlineOffset = offset; renderMainlinePage(); });
+  }
   async function networkLoadMainline() {
     if (!networkSession?.token) return;
     try {
-      const params = new URLSearchParams({ category: mainlineCategory.value, sort: mainlineSort.value, q: mainlineSearch.value.trim(), offset: String(mainlineOffset) });
-      const response = await fetch(`${networkSession.api}/api/worldbook?${params}`, { headers: networkHeaders() });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(networkError(data, '读取失败'));
-      mainlineItems.innerHTML = data.items?.length ? data.items.map((item, index) => { const [state, title] = mainlineStatus(item); return `<details class="th-arcadia-network-item" data-index="${index}"><summary><span class="th-arcadia-entry-status-dot th-arcadia-entry-status-${state}" title="${title}"></span><span class="th-arcadia-network-item-title">${escapeHtml(item.name || '未命名条目')}</span><span class="th-arcadia-network-item-author">上传者：${escapeHtml(item.authorName || '管理员')}</span><span class="th-arcadia-network-item-stats">${item.updatedAt ? escapeHtml(new Date(item.updatedAt).toLocaleDateString()) : ''}</span></summary><div class="th-arcadia-network-item-body"><div class="th-arcadia-workshop-sections">${workshopTaggedSections(item.content, differingTags(item))}</div></div></details>`; }).join('') : '<div class="th-arcadia-settings-hint">没有符合条件的条目</div>';
-      mainlineItems.querySelectorAll('.th-arcadia-workshop-section').forEach(section => { section.open = false; });
-      renderPager(mainlinePager, data.total || 0, mainlineOffset, offset => { mainlineOffset = offset; networkLoadMainline(); });
-      setStatus(`已读取 ${data.items?.length || 0} 个世界书本体条目`);
+      const baseParams = new URLSearchParams({ category: mainlineCategory.value, sort: mainlineSort.value, q: mainlineSearch.value.trim() });
+      const allItems = [];
+      let offset = 0;
+      let total = 0;
+      do {
+        const params = new URLSearchParams(baseParams);
+        params.set('offset', String(offset));
+        const response = await fetch(`${networkSession.api}/api/worldbook?${params}`, { headers: networkHeaders() });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(networkError(data, '读取失败'));
+        const pageItems = data.items || [];
+        allItems.push(...pageItems);
+        total = Number(data.total) || allItems.length;
+        offset += Number(data.limit) || 10;
+        if (!pageItems.length) break;
+      } while (offset < total);
+      mainlineCache = allItems;
+      mainlineOffset = 0;
+      renderMainlinePage();
+      setStatus(`已读取全部 ${mainlineCache.length} 个世界书本体条目`);
     } catch (error) { setStatus(`读取世界书本体失败：${error.message}`); }
   }
   async function networkLoadMine() {
