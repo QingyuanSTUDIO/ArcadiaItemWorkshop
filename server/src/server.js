@@ -67,6 +67,17 @@ function nonNegativeInteger(value, fallback = 0) {
   return Number.isInteger(number) && number >= 0 ? number : fallback;
 }
 
+function validateChatContent(value) {
+  if (typeof value !== 'string') throw new ValidationError('留言内容必须是字符串');
+  const content = value.trim();
+  if (!content) throw new ValidationError('留言内容不能为空');
+  if (content.length > 1000) throw new ValidationError('留言内容不能超过 1000 个字符');
+  if (/<\s*script\b|javascript\s*:|\bon(?:error|load|click|mouseover)\s*=/i.test(content)) {
+    throw new ValidationError('留言内容包含不允许的可执行内容');
+  }
+  return content;
+}
+
 function decodePathPart(value) {
   try { return decodeURIComponent(value); }
   catch { const error = new Error('URL 中的条目 ID 不合法'); error.statusCode = 400; throw error; }
@@ -401,6 +412,26 @@ const server = http.createServer(async (req, res) => {
         if (module === 'workshop' && existing.authorId !== user.id && !isAdminUser(user)) return send(req, res, 403, { error: '只能删除自己上传的创意工坊条目' });
         return send(req, res, 200, { ok: repository.deleteWorldbookEntry(id) });
       }
+    }
+    if (url.pathname.startsWith('/api/chat')) {
+      const user = requireUserWithBan(req, res); if (!user) return;
+      if (req.method === 'GET' && url.pathname === '/api/chat/messages') {
+        const since = String(url.searchParams.get('since') || '').slice(0, 40);
+        return send(req, res, 200, { messages: repository.listChatMessages({ since }), total: repository.countChatMessages() });
+      }
+      if (req.method === 'POST' && url.pathname === '/api/chat/messages') {
+        const body = await readBody(req);
+        const now = new Date().toISOString();
+        const message = repository.createChatMessage({ id: crypto.randomUUID(), userId: user.id, content: validateChatContent(body.content), createdAt: now, updatedAt: now });
+        return send(req, res, 201, { message });
+      }
+      if (req.method === 'POST' && parts.length === 5 && parts[0] === 'api' && parts[1] === 'chat' && parts[2] === 'messages' && (parts[4] === 'like' || parts[4] === 'dislike')) {
+        const result = repository.reactChatMessage(decodePathPart(parts[3]), user.id, parts[4]);
+        if (result.kind === 'missing') return send(req, res, 404, { error: '留言不存在或已隐藏' });
+        if (result.kind === 'duplicate') return send(req, res, 409, { error: '你已经对这条留言操作过了' });
+        return send(req, res, 200, { message: result.message, hidden: result.hidden });
+      }
+      return send(req, res, 404, { error: '聊天接口不存在' });
     }
     if (req.method === 'GET' && url.pathname === '/api/health') {
       return send(req, res, 200, { ok: true, service: 'arcadia-item-workshop', version: '0.1.0' });

@@ -76,6 +76,24 @@ export function openDatabase(filename) {
       created_at TEXT NOT NULL,
       PRIMARY KEY(entry_id, user_id, reaction)
     );
+    CREATE TABLE IF NOT EXISTS chat_messages (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      content TEXT NOT NULL,
+      like_count INTEGER NOT NULL DEFAULT 0,
+      dislike_count INTEGER NOT NULL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'published' CHECK(status IN ('published', 'hidden')),
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_chat_messages_public ON chat_messages(status, created_at);
+    CREATE TABLE IF NOT EXISTS chat_reactions (
+      message_id TEXT NOT NULL REFERENCES chat_messages(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      reaction TEXT NOT NULL CHECK(reaction IN ('like', 'dislike')),
+      created_at TEXT NOT NULL,
+      PRIMARY KEY(message_id, user_id)
+    );
   `);
   for (const definition of [
     "last_ip TEXT NOT NULL DEFAULT ''",
@@ -110,6 +128,7 @@ export function createRepository(db, reportLimit = 5) {
     }
   };
   const entryRow = row => ({ id: row.id, module: row.module, worldbookName: row.worldbook_name, uid: row.uid, name: row.name, content: row.content, category: row.category || '商品', strategy: parseJsonObject(row.strategy_json), position: parseJsonObject(row.position_json), enabled: Boolean(row.enabled), authorId: row.author_id, authorName: row.author_name || '', downloadCount: Number(row.download_count) || 0, likeCount: Number(row.like_count) || 0, reportCount: Number(row.report_count) || 0, moderationStatus: row.moderation_status || 'published', createdAt: row.created_at, updatedAt: row.updated_at });
+  const chatRow = row => ({ id: row.id, username: row.username, content: row.content, likeCount: Number(row.like_count) || 0, dislikeCount: Number(row.dislike_count) || 0, createdAt: row.created_at });
   const insertReport = db.prepare('INSERT INTO reports (item_id, reporter_hash, reason, created_at) VALUES (?, ?, ?, ?)');
   const updateReportCount = db.prepare(`
     UPDATE items
@@ -193,6 +212,34 @@ export function createRepository(db, reportLimit = 5) {
         FROM worldbook_reactions r JOIN users u ON u.id = r.user_id
         WHERE r.entry_id = ? ORDER BY r.created_at DESC`).all(id)
         .map(row => ({ reaction: row.reaction, userId: row.user_id, username: row.username, createdAt: row.created_at }));
+    },
+    listChatMessages({ since = '' } = {}) {
+      return db.prepare(`SELECT m.*, u.username
+        FROM chat_messages m JOIN users u ON u.id = m.user_id
+        WHERE m.status = 'published' AND (? = '' OR m.created_at > ?)
+        ORDER BY m.created_at ASC`).all(since, since).map(chatRow);
+    },
+    countChatMessages() {
+      return db.prepare("SELECT COUNT(*) AS count FROM chat_messages WHERE status = 'published'").get().count;
+    },
+    createChatMessage(message) {
+      db.prepare(`INSERT INTO chat_messages (id, user_id, content, created_at, updated_at)
+        VALUES (@id, @userId, @content, @createdAt, @updatedAt)`).run(message);
+      return chatRow(db.prepare(`SELECT m.*, u.username FROM chat_messages m JOIN users u ON u.id = m.user_id WHERE m.id = ?`).get(message.id));
+    },
+    reactChatMessage(id, userId, reaction) {
+      const message = db.prepare("SELECT * FROM chat_messages WHERE id = ? AND status = 'published'").get(id);
+      if (!message) return { kind: 'missing' };
+      try {
+        db.prepare('INSERT INTO chat_reactions (message_id, user_id, reaction, created_at) VALUES (?, ?, ?, ?)').run(id, userId, reaction, new Date().toISOString());
+      } catch (error) {
+        if (error.code === 'SQLITE_CONSTRAINT_PRIMARYKEY' || error.code === 'SQLITE_CONSTRAINT_UNIQUE') return { kind: 'duplicate' };
+        throw error;
+      }
+      const column = reaction === 'like' ? 'like_count' : 'dislike_count';
+      db.prepare(`UPDATE chat_messages SET ${column} = ${column} + 1, status = CASE WHEN dislike_count + ${reaction === 'dislike' ? 1 : 0} > 10 THEN 'hidden' ELSE status END, updated_at = ? WHERE id = ?`).run(new Date().toISOString(), id);
+      const updated = db.prepare(`SELECT m.*, u.username FROM chat_messages m JOIN users u ON u.id = m.user_id WHERE m.id = ?`).get(id);
+      return { kind: 'accepted', hidden: updated.status === 'hidden', message: chatRow(updated) };
     },
     updateWorldbookStats(id, stats) {
       db.prepare('UPDATE worldbook_entries SET download_count = ?, like_count = ?, report_count = ? WHERE id = ?').run(stats.downloadCount, stats.likeCount, stats.reportCount, id);
