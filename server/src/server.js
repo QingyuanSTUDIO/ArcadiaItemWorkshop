@@ -20,7 +20,7 @@ const SESSION_SECRET = process.env.SESSION_SECRET || ADMIN_PASSWORD || 'arcadia-
 const SESSION_TTL_MS = parseInteger(process.env.SESSION_TTL_HOURS, 24 * 30, 1, 24 * 365) * 60 * 60 * 1000;
 const DEBUG_ERRORS = process.env.DEBUG_ERRORS === 'true';
 const sessions = new Map();
-const repository = createRepository(openDatabase(path.join(ROOT, 'data', 'workshop.sqlite')));
+const repository = createRepository(openDatabase(process.env.DATABASE_PATH || path.join(ROOT, 'data', 'workshop.sqlite')));
 const hashPassword = value => crypto.createHash('sha256').update(String(value)).digest('hex');
 if (ADMIN_PASSWORD && repository.listUsers().length === 0) {
   const now = new Date().toISOString();
@@ -76,6 +76,17 @@ function validateChatContent(value) {
     throw new ValidationError('留言内容包含不允许的可执行内容');
   }
   return content;
+}
+
+function chatMuteUntil(value) {
+  const duration = String(value || '').trim().toLowerCase();
+  if (duration === 'permanent' || duration === 'forever' || duration === '永久') return '9999-12-31T23:59:59.999Z';
+  const match = duration.match(/^(\d{1,7})(m|h|d|w)$/);
+  if (!match) throw new ValidationError('禁言时间格式不合法，应为 30m、12h、7d、2w 或 permanent');
+  const multipliers = { m: 60 * 1000, h: 60 * 60 * 1000, d: 24 * 60 * 60 * 1000, w: 7 * 24 * 60 * 60 * 1000 };
+  const timestamp = Date.now() + Number(match[1]) * multipliers[match[2]];
+  if (timestamp <= Date.now() || !Number.isFinite(new Date(timestamp).getTime())) throw new ValidationError('禁言时间必须大于 0');
+  return new Date(timestamp).toISOString();
 }
 
 function decodePathPart(value) {
@@ -157,6 +168,7 @@ function authToken(req) {
   return header.startsWith('Bearer ') ? header.slice(7).trim() : cookieValue(req, 'arcadia_admin');
 }
 function issueSession(user) {
+  repository.touchChatActivity(user.id);
   const payload = Buffer.from(JSON.stringify({ userId: user.id, expiry: Date.now() + SESSION_TTL_MS })).toString('base64url');
   const signature = crypto.createHmac('sha256', SESSION_SECRET).update(payload).digest('base64url');
   const token = `${payload}.${signature}`;
@@ -227,8 +239,8 @@ const server = http.createServer(async (req, res) => {
   try {
     if (req.method === 'OPTIONS') return send(req, res, 204, null);
     if (req.method === 'GET' && url.pathname === '/admin') return sendFile(res, path.join(ROOT, 'admin', 'index.html'), 'text/html; charset=utf-8');
-    if (req.method === 'GET' && (url.pathname === '/admin/users' || url.pathname === '/admin/content')) {
-      const file = url.pathname === '/admin/users' ? 'users.html' : 'content.html';
+    if (req.method === 'GET' && ['/admin/users', '/admin/content', '/admin/chat'].includes(url.pathname)) {
+      const file = url.pathname === '/admin/chat' ? 'chat.html' : url.pathname === '/admin/users' ? 'users.html' : 'content.html';
       return sendFile(res, path.join(ROOT, 'admin', file), 'text/html; charset=utf-8');
     }
     if (req.method === 'POST' && url.pathname === '/api/admin/login') {
@@ -276,6 +288,35 @@ const server = http.createServer(async (req, res) => {
     }
     if (url.pathname.startsWith('/api/admin/')) {
       if (!requireAdmin(req, res)) return;
+      if (req.method === 'GET' && url.pathname === '/api/admin/chat/messages') {
+        const status = ['all', 'published', 'hidden'].includes(url.searchParams.get('status')) ? url.searchParams.get('status') : 'all';
+        const query = (url.searchParams.get('q') || '').trim().slice(0, 100);
+        const filter = { query, status, limit: parseInteger(url.searchParams.get('limit'), 50, 1, 200), offset: parseInteger(url.searchParams.get('offset'), 0, 0, 10000000) };
+        return send(req, res, 200, { messages: repository.listAdminChatMessages(filter), total: repository.countAdminChatMessages(filter) });
+      }
+      if (parts.length === 5 && parts[2] === 'chat' && parts[3] === 'messages') {
+        const id = decodePathPart(parts[4]);
+        if (req.method === 'DELETE') {
+          const ok = repository.deleteChatMessage(id);
+          return send(req, res, ok ? 200 : 404, ok ? { ok } : { error: '留言不存在' });
+        }
+        if (req.method === 'POST') {
+          const body = await readBody(req);
+          if (!['published', 'hidden'].includes(body.status)) throw new ValidationError('留言状态不合法');
+          const ok = repository.setChatMessageStatus(id, body.status);
+          return send(req, res, ok ? 200 : 404, ok ? { ok } : { error: '留言不存在' });
+        }
+      }
+      if (req.method === 'POST' && parts.length === 6 && parts[0] === 'api' && parts[1] === 'admin' && parts[2] === 'chat' && parts[3] === 'users' && parts[5] === 'mute') {
+        const target = repository.getUser(decodePathPart(parts[4]));
+        if (!target) return send(req, res, 404, { error: '用户不存在' });
+        const body = await readBody(req);
+        if (!['mute', 'unmute'].includes(body.action)) throw new ValidationError('禁言操作必须是 mute 或 unmute');
+        if (body.action === 'unmute') return send(req, res, 200, { user: repository.clearChatMute(target.id), action: 'unmute' });
+        if (target.role === 'admin') return send(req, res, 403, { error: '不能禁言管理员账号' });
+        const until = chatMuteUntil(body.duration);
+        return send(req, res, 200, { user: repository.setChatMute(target.id, until, String(body.reason || '').slice(0, 200)), action: 'mute', until });
+      }
       if (req.method === 'GET' && parts.length === 4 && parts[0] === 'api' && parts[1] === 'admin' && parts[2] === 'items') {
         const item = repository.adminGet(parts[3]);
         return item ? send(req, res, 200, { item }) : send(req, res, 404, { error: '条目不存在' });
@@ -415,20 +456,28 @@ const server = http.createServer(async (req, res) => {
     }
     if (url.pathname.startsWith('/api/chat')) {
       const user = requireUserWithBan(req, res); if (!user) return;
+      if (req.method === 'POST' && url.pathname === '/api/chat/activity') {
+        repository.touchChatActivity(user.id);
+        return send(req, res, 200, { ok: true });
+      }
       if (req.method === 'GET' && url.pathname === '/api/chat/messages') {
         const since = String(url.searchParams.get('since') || '').slice(0, 40);
-        return send(req, res, 200, { messages: repository.listChatMessages({ since }), total: repository.countChatMessages() });
+        return send(req, res, 200, { messages: repository.listChatMessages({ since }), mutedUntil: repository.getChatMutedUntil(user.id), cooldownUntil: isAdminUser(user) ? null : repository.getChatCooldown(user.id), role: user.role, serverTime: new Date().toISOString() });
       }
       if (req.method === 'POST' && url.pathname === '/api/chat/messages') {
         const body = await readBody(req);
         const now = new Date().toISOString();
-        const message = repository.createChatMessage({ id: crypto.randomUUID(), userId: user.id, content: validateChatContent(body.content), createdAt: now, updatedAt: now });
-        return send(req, res, 201, { message });
+        const content = validateChatContent(body?.content);
+        const result = repository.sendChatMessage({ id: crypto.randomUUID(), userId: user.id, content, createdAt: now, updatedAt: now });
+        if (result.kind === 'muted') return send(req, res, 403, { error: '你已被禁言', until: result.until });
+        if (result.kind === 'cooldown') return send(req, res, 429, { error: '发言冷却中', until: result.until }, { 'Retry-After': '10' });
+        return send(req, res, 201, { message: result.message, cooldownUntil: isAdminUser(user) ? null : repository.getChatCooldown(user.id), serverTime: new Date().toISOString() });
       }
       if (req.method === 'POST' && parts.length === 5 && parts[0] === 'api' && parts[1] === 'chat' && parts[2] === 'messages' && (parts[4] === 'like' || parts[4] === 'dislike')) {
         const result = repository.reactChatMessage(decodePathPart(parts[3]), user.id, parts[4]);
         if (result.kind === 'missing') return send(req, res, 404, { error: '留言不存在或已隐藏' });
         if (result.kind === 'duplicate') return send(req, res, 409, { error: '你已经对这条留言操作过了' });
+        repository.touchChatActivity(user.id);
         return send(req, res, 200, { message: result.message, hidden: result.hidden });
       }
       return send(req, res, 404, { error: '聊天接口不存在' });

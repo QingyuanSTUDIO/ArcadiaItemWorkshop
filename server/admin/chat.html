@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>阿卡狄亚工坊 · 聊天管理</title>
+  <style>
+    *{box-sizing:border-box}body{margin:0;background:#171717;color:#eee;font:14px system-ui}
+    header{padding:16px 22px;background:#d9a441;color:#171717;display:flex;gap:16px;align-items:center;flex-wrap:wrap}
+    header a{color:inherit}main{max-width:1200px;margin:24px auto;padding:0 16px}
+    h2{font-size:18px}nav,.filters,.actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+    button,input,select,textarea{font:inherit;padding:8px;border-radius:4px;border:1px solid #555;background:#242424;color:#eee}
+    button{cursor:pointer}button:disabled{opacity:.5}button[aria-selected=true],button.primary{background:#d9a441;color:#171717}
+    .danger{background:#a93636}.filters{margin:16px 0}.filters input{flex:1;min-width:120px}
+    article{border-top:1px solid #444;padding:14px 0}.meta{color:#bbb;display:flex;gap:12px;flex-wrap:wrap}
+    .body{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.6;margin:10px 0}
+    .dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#ef4444;margin-left:5px}.active{background:#33c775}
+    .muted{color:#ffabab}.actions{margin-top:10px}#state{min-height:24px;white-space:pre-wrap}
+    dialog{background:#242424;color:#eee;border:1px solid #666;border-radius:6px;width:420px;max-width:calc(100vw - 24px)}
+    dialog::backdrop{background:#0009}label{display:grid;gap:6px;margin:12px 0}textarea{resize:vertical}
+    [hidden]{display:none!important}.empty{padding:24px 0;color:#bbb}
+  </style>
+</head>
+<body>
+  <header><b>阿卡狄亚工坊 · 聊天管理</b><a href="/admin">管理首页</a><a href="/admin/content">内容管理</a><a href="/admin/users">用户管理</a></header>
+  <main>
+    <nav aria-label="聊天管理视图"><button id="messagesTab" aria-selected="true">留言管理</button><button id="usersTab" aria-selected="false">禁言与用户</button></nav>
+    <div class="filters"><input id="query" type="search" placeholder="搜索内容或用户名" aria-label="搜索"><select id="status" aria-label="留言状态"><option value="all">全部留言</option><option value="published">公开</option><option value="hidden">已隐藏</option></select><select id="userStatus" aria-label="用户状态" hidden><option value="all">全部用户</option><option value="muted">已禁言</option><option value="banned">账号或 IP 已封禁</option><option value="active">最近活跃</option></select><button id="reload">刷新</button></div>
+    <p id="state" role="status"></p><div id="list"></div>
+    <div class="actions"><button id="prev">上一页</button><span id="page"></span><button id="next">下一页</button></div>
+  </main>
+  <dialog id="muteDialog"><form id="muteForm"><h2 id="muteTitle">禁言用户</h2><label>时长<select id="duration"><option value="30m">30 分钟</option><option value="12h">12 小时</option><option value="1d" selected>1 天</option><option value="7d">7 天</option><option value="permanent">永久</option></select></label><label>原因<textarea id="reason" maxlength="200" rows="3"></textarea></label><p id="muteError" role="alert"></p><div class="actions"><button type="button" id="cancel">取消</button><button type="submit" class="danger">确认禁言</button></div></form></dialog>
+  <script>
+    const $ = id => document.getElementById(id);
+    let view = 'messages', offset = 0, total = 0, target = null, generation = 0;
+    const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    const date = value => !value ? '无' : String(value).startsWith('9999-') ? '永久' : new Date(value).toLocaleString();
+    const presence = active => `<span class="dot ${active ? 'active' : ''}" title="${active ? '20 分钟内活跃' : '20 分钟未活跃'}"></span>`;
+    async function api(url, options = {}) {
+      const token = localStorage.getItem('arcadia_admin_token');
+      const response = await fetch(url, {credentials:'same-origin', ...options, headers:{'Content-Type':'application/json', ...(token ? {Authorization:`Bearer ${token}`} : {})}});
+      const data = await response.json();
+      if (!response.ok) throw Error(data.error || `请求失败 (${response.status})`);
+      return data;
+    }
+    function muteButton(user) {
+      return user.role === 'admin' ? '' : `<button data-mute="${esc(user.id)}" data-name="${esc(user.username)}" class="danger">禁言</button>`;
+    }
+    async function load() {
+      const request = ++generation;
+      $('state').textContent = '正在读取…';
+      try {
+        const query = $('query').value.trim();
+        let rows;
+        if (view === 'messages') {
+          const data = await api(`/api/admin/chat/messages?${new URLSearchParams({q:query,status:$('status').value,offset,limit:50})}`);
+          rows = data.messages; total = data.total;
+          if (request !== generation) return;
+          $('list').innerHTML = rows.map(m => `<article><div class="meta"><b>${esc(m.username)}${presence(m.active)}</b><time>${esc(date(m.createdAt))}</time><span>${m.status === 'hidden' ? '已隐藏' : '公开'}</span><span>赞 ${m.likeCount} · 踩 ${m.dislikeCount}</span></div><div class="body">${esc(m.content)}</div><div class="actions"><button data-status="${m.status === 'hidden' ? 'published' : 'hidden'}" data-id="${esc(m.id)}">${m.status === 'hidden' ? '恢复' : '隐藏'}</button><button data-delete="${esc(m.id)}" class="danger">删除</button>${muteButton({id:m.userId,username:m.username,role:m.authorRole})}</div></article>`).join('');
+        } else {
+          const data = await api('/api/admin/users');
+          if (request !== generation) return;
+          const filter = $('userStatus').value;
+          const all = data.users.filter(u => u.username.toLowerCase().includes(query.toLowerCase()) && (filter === 'all' || filter === 'muted' && u.chat_muted || filter === 'banned' && (u.account_banned || u.ip_banned) || filter === 'active' && u.active));
+          total = all.length; rows = all.slice(offset, offset + 50);
+          $('list').innerHTML = rows.map(u => `<article><div class="meta"><b>${esc(u.username)}${presence(u.active)}</b><span>${esc(u.role)}</span><span>最后活跃：${esc(date(u.chat_active_at))}</span></div><p class="${u.chat_muted ? 'muted' : ''}">${u.chat_muted ? `禁言至 ${esc(date(u.chat_muted_until))}` : '未禁言'} · ${u.account_banned ? '账号已封禁' : '账号正常'} · ${u.ip_banned ? 'IP 已封禁' : 'IP 正常'}</p><div class="body">${esc(u.chat_muted_reason)}</div><div class="actions">${muteButton(u)}${u.chat_muted ? `<button data-unmute="${esc(u.id)}">解除禁言</button>` : ''}</div></article>`).join('');
+        }
+        if (!rows.length) $('list').innerHTML = '<p class="empty">暂无记录</p>';
+        $('state').textContent = `共 ${total} 条记录`;
+        $('page').textContent = `${Math.floor(offset / 50) + 1} / ${Math.max(1, Math.ceil(total / 50))}`;
+        $('prev').disabled = offset === 0; $('next').disabled = offset + 50 >= total;
+      } catch (error) { if (request === generation) { $('state').textContent = error.message; $('list').replaceChildren(); } }
+    }
+    $('list').addEventListener('click', async event => {
+      const b = event.target.closest('button'); if (!b) return;
+      if (b.dataset.mute) {
+        target = b.dataset.mute; $('muteTitle').textContent = `禁言 ${b.dataset.name}`;
+        $('reason').value = ''; $('muteError').textContent = ''; $('muteDialog').showModal(); return;
+      }
+      b.disabled = true;
+      try {
+        if (b.dataset.unmute) {
+          if (!confirm('确认解除禁言？')) return;
+          await api(`/api/admin/chat/users/${encodeURIComponent(b.dataset.unmute)}/mute`, {method:'POST',body:JSON.stringify({action:'unmute'})});
+        } else if (b.dataset.delete) {
+          if (!confirm('永久删除这条留言及其互动记录？')) return;
+          await api(`/api/admin/chat/messages/${encodeURIComponent(b.dataset.delete)}`, {method:'DELETE'});
+        } else if (b.dataset.status) {
+          await api(`/api/admin/chat/messages/${encodeURIComponent(b.dataset.id)}`, {method:'POST',body:JSON.stringify({status:b.dataset.status})});
+        }
+        await load();
+      } catch (error) { $('state').textContent = error.message; }
+      finally { b.disabled = false; }
+    });
+    $('muteForm').onsubmit = async event => {
+      event.preventDefault(); const button = event.submitter; button.disabled = true;
+      try {
+        await api(`/api/admin/chat/users/${encodeURIComponent(target)}/mute`, {method:'POST',body:JSON.stringify({action:'mute',duration:$('duration').value,reason:$('reason').value})});
+        $('muteDialog').close(); await load();
+      } catch (error) { $('muteError').textContent = error.message; }
+      finally { button.disabled = false; }
+    };
+    $('cancel').onclick = () => $('muteDialog').close();
+    function changeView(value) {
+      view = value; offset = 0; $('status').hidden = view !== 'messages'; $('userStatus').hidden = view !== 'users';
+      $('messagesTab').setAttribute('aria-selected', String(view === 'messages')); $('usersTab').setAttribute('aria-selected', String(view === 'users')); load();
+    }
+    $('messagesTab').onclick = () => changeView('messages'); $('usersTab').onclick = () => changeView('users');
+    $('reload').onclick = () => { offset = 0; load(); };
+    $('status').onchange = $('userStatus').onchange = () => { offset = 0; load(); };
+    $('query').onkeydown = e => { if (e.key === 'Enter') { offset = 0; load(); } };
+    $('prev').onclick = () => { offset = Math.max(0,offset-50); load(); };
+    $('next').onclick = () => { offset += 50; load(); };
+    load();
+  </script>
+</body>
+</html>

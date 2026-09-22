@@ -99,6 +99,10 @@ export function openDatabase(filename) {
     "last_ip TEXT NOT NULL DEFAULT ''",
     "ban_until TEXT NOT NULL DEFAULT ''",
     "ban_type TEXT NOT NULL DEFAULT ''",
+    "chat_active_at TEXT NOT NULL DEFAULT ''",
+    "chat_muted_until TEXT NOT NULL DEFAULT ''",
+    "chat_muted_reason TEXT NOT NULL DEFAULT ''",
+    "chat_sent_at TEXT NOT NULL DEFAULT ''",
   ]) {
     try { db.exec(`ALTER TABLE users ADD COLUMN ${definition}`); } catch (error) { if (!String(error.message).includes('duplicate column')) throw error; }
   }
@@ -107,6 +111,9 @@ export function openDatabase(filename) {
     try { db.exec(`ALTER TABLE worldbook_entries ADD COLUMN ${column} INTEGER NOT NULL DEFAULT 0`); } catch (error) { if (!String(error.message).includes('duplicate column')) throw error; }
   }
   try { db.exec("ALTER TABLE worldbook_entries ADD COLUMN moderation_status TEXT NOT NULL DEFAULT 'published'"); } catch (error) { if (!String(error.message).includes('duplicate column')) throw error; }
+  db.exec(`UPDATE users SET chat_sent_at = COALESCE((SELECT MAX(created_at) FROM chat_messages WHERE user_id = users.id), '')
+    WHERE chat_sent_at = ''`);
+  db.exec('CREATE INDEX IF NOT EXISTS idx_chat_user_time ON chat_messages(user_id, created_at)');
   return db;
 }
 
@@ -118,7 +125,7 @@ export function createRepository(db, reportLimit = 5) {
   const getPublic = db.prepare("SELECT * FROM items WHERE id = ? AND status = 'published'");
   const getAny = db.prepare('SELECT * FROM items WHERE id = ?');
   const getUserByUsername = db.prepare('SELECT * FROM users WHERE username = ?');
-  const getUserById = db.prepare('SELECT id, username, role, last_ip, ban_until, ban_type, created_at, updated_at FROM users WHERE id = ?');
+  const getUserById = db.prepare('SELECT id, username, role, last_ip, ban_until, ban_type, chat_active_at, chat_muted_until, chat_muted_reason, created_at, updated_at FROM users WHERE id = ?');
   const parseJsonObject = value => {
     try {
       const parsed = JSON.parse(value || '{}');
@@ -128,7 +135,8 @@ export function createRepository(db, reportLimit = 5) {
     }
   };
   const entryRow = row => ({ id: row.id, module: row.module, worldbookName: row.worldbook_name, uid: row.uid, name: row.name, content: row.content, category: row.category || '商品', strategy: parseJsonObject(row.strategy_json), position: parseJsonObject(row.position_json), enabled: Boolean(row.enabled), authorId: row.author_id, authorName: row.author_name || '', downloadCount: Number(row.download_count) || 0, likeCount: Number(row.like_count) || 0, reportCount: Number(row.report_count) || 0, moderationStatus: row.moderation_status || 'published', createdAt: row.created_at, updatedAt: row.updated_at });
-  const chatRow = row => ({ id: row.id, username: row.username, content: row.content, likeCount: Number(row.like_count) || 0, dislikeCount: Number(row.dislike_count) || 0, createdAt: row.created_at });
+  const chatRow = row => ({ id: row.id, userId: row.user_id, username: row.username, authorRole: row.author_role, muted: new Date(row.chat_muted_until).getTime() > Date.now(), content: row.content, likeCount: Number(row.like_count) || 0, dislikeCount: Number(row.dislike_count) || 0, createdAt: row.created_at, active: Number.isFinite(new Date(row.chat_active_at).getTime()) && Date.now() - new Date(row.chat_active_at).getTime() < 20 * 60 * 1000 });
+  const adminChatRow = row => ({ ...chatRow(row), userId: row.user_id, status: row.status, updatedAt: row.updated_at });
   const insertReport = db.prepare('INSERT INTO reports (item_id, reporter_hash, reason, created_at) VALUES (?, ?, ?, ?)');
   const updateReportCount = db.prepare(`
     UPDATE items
@@ -160,11 +168,16 @@ export function createRepository(db, reportLimit = 5) {
     getUser(id) { return getUserById.get(id) || null; },
     listUsers() {
       const rows = db.prepare(`SELECT u.id, u.username, u.role, u.last_ip, u.ban_until, u.ban_type,
-        u.created_at, u.updated_at, ib.ban_until AS ip_ban_until
+        u.chat_active_at, u.chat_muted_until, u.chat_muted_reason, u.created_at, u.updated_at, ib.ban_until AS ip_ban_until
         FROM users u LEFT JOIN ip_bans ib ON ib.ip = u.last_ip ORDER BY u.created_at`).all();
-      return rows.map(row => ({ ...row, account_banned: row.ban_type === 'account' && Number.isFinite(new Date(row.ban_until).getTime()) && new Date(row.ban_until).getTime() > Date.now(), ip_banned: Number.isFinite(new Date(row.ip_ban_until).getTime()) && new Date(row.ip_ban_until).getTime() > Date.now() }));
+      return rows.map(row => ({ ...row, active: Number.isFinite(new Date(row.chat_active_at).getTime()) && Date.now() - new Date(row.chat_active_at).getTime() <= 20 * 60 * 1000, chat_muted: Number.isFinite(new Date(row.chat_muted_until).getTime()) && new Date(row.chat_muted_until).getTime() > Date.now(), account_banned: row.ban_type === 'account' && Number.isFinite(new Date(row.ban_until).getTime()) && new Date(row.ban_until).getTime() > Date.now(), ip_banned: Number.isFinite(new Date(row.ip_ban_until).getTime()) && new Date(row.ip_ban_until).getTime() > Date.now() }));
     },
     touchUserIp(id, ip) { db.prepare('UPDATE users SET last_ip = ?, updated_at = ? WHERE id = ?').run(ip, new Date().toISOString(), id); },
+    touchChatActivity(id, now = new Date().toISOString()) { db.prepare('UPDATE users SET chat_active_at = ?, updated_at = ? WHERE id = ?').run(now, now, id); },
+    getChatMutedUntil(id) { const row = db.prepare("SELECT chat_muted_until FROM users WHERE id = ? AND chat_muted_until <> ''").get(id); return row && new Date(row.chat_muted_until).getTime() > Date.now() ? row.chat_muted_until : null; },
+    setChatMute(id, until, reason = '') { const result = db.prepare('UPDATE users SET chat_muted_until = ?, chat_muted_reason = ?, updated_at = ? WHERE id = ?').run(until, reason, new Date().toISOString(), id); return result.changes ? getUserById.get(id) : null; },
+    clearChatMute(id) { const result = db.prepare("UPDATE users SET chat_muted_until = '', chat_muted_reason = '', updated_at = ? WHERE id = ?").run(new Date().toISOString(), id); return result.changes ? getUserById.get(id) : null; },
+    getChatCooldown(id, now = Date.now()) { const row = db.prepare('SELECT chat_sent_at FROM users WHERE id = ?').get(id); if (!row?.chat_sent_at) return null; const until = new Date(row.chat_sent_at).getTime() + 10 * 1000; return until > now ? new Date(until).toISOString() : null; },
     setUserBan(id, until, type = 'account') { const result = db.prepare('UPDATE users SET ban_until = ?, ban_type = ?, updated_at = ? WHERE id = ?').run(until, type === 'account' ? 'account' : '', new Date().toISOString(), id); return result.changes ? getUserById.get(id) : null; },
     clearUserBan(id) { const result = db.prepare("UPDATE users SET ban_until = '', ban_type = '', updated_at = ? WHERE id = ?").run(new Date().toISOString(), id); return result.changes ? getUserById.get(id) : null; },
     getActiveUserBan(id) { const row = db.prepare("SELECT ban_until FROM users WHERE id = ? AND ban_type = 'account' AND ban_until <> ''").get(id); return row && new Date(row.ban_until).getTime() > Date.now() ? row.ban_until : null; },
@@ -214,18 +227,50 @@ export function createRepository(db, reportLimit = 5) {
         .map(row => ({ reaction: row.reaction, userId: row.user_id, username: row.username, createdAt: row.created_at }));
     },
     listChatMessages({ since = '' } = {}) {
-      return db.prepare(`SELECT m.*, u.username
+      return db.prepare(`SELECT m.*, u.username, u.chat_active_at, u.role AS author_role, u.chat_muted_until
         FROM chat_messages m JOIN users u ON u.id = m.user_id
         WHERE m.status = 'published' AND (? = '' OR m.created_at > ?)
-        ORDER BY m.created_at ASC`).all(since, since).map(chatRow);
+        ORDER BY m.created_at DESC, m.rowid DESC LIMIT 200`).all(since, since).reverse().map(chatRow);
     },
     countChatMessages() {
       return db.prepare("SELECT COUNT(*) AS count FROM chat_messages WHERE status = 'published'").get().count;
     },
+    countAdminChatMessages({ query = '', status = 'all' } = {}) {
+      return db.prepare(`SELECT COUNT(*) AS count FROM chat_messages m JOIN users u ON u.id=m.user_id
+        WHERE (? = '' OR m.content LIKE ? OR u.username LIKE ?) AND (? = 'all' OR m.status = ?)`)
+        .get(query, `%${query}%`, `%${query}%`, status, status).count;
+    },
+    listAdminChatMessages({ query = '', status = 'all', limit = 50, offset = 0 } = {}) {
+      const safeLimit = Math.max(1, Math.min(500, Number(limit) || 200));
+      return db.prepare(`SELECT m.*, u.username, u.chat_active_at, u.role AS author_role, u.chat_muted_until
+        FROM chat_messages m JOIN users u ON u.id = m.user_id
+        WHERE (? = '' OR m.content LIKE ? OR u.username LIKE ?)
+          AND (? = 'all' OR m.status = ?)
+        ORDER BY m.created_at DESC, m.rowid DESC LIMIT ? OFFSET ?`).all(query, `%${query}%`, `%${query}%`, status, status, safeLimit, offset).map(adminChatRow);
+    },
+    setChatMessageStatus(id, status) {
+      return db.prepare('UPDATE chat_messages SET status = ?, updated_at = ? WHERE id = ?').run(status, new Date().toISOString(), id).changes > 0;
+    },
+    deleteChatMessage(id) { return db.prepare('DELETE FROM chat_messages WHERE id = ?').run(id).changes > 0; },
     createChatMessage(message) {
-      db.prepare(`INSERT INTO chat_messages (id, user_id, content, created_at, updated_at)
-        VALUES (@id, @userId, @content, @createdAt, @updatedAt)`).run(message);
+      const insert = db.transaction(() => {
+        db.prepare(`INSERT INTO chat_messages (id, user_id, content, created_at, updated_at)
+          VALUES (@id, @userId, @content, @createdAt, @updatedAt)`).run(message);
+        db.prepare('UPDATE users SET chat_sent_at = ?, chat_active_at = ? WHERE id = ?').run(message.createdAt, message.createdAt, message.userId);
+      });
+      insert();
       return chatRow(db.prepare(`SELECT m.*, u.username FROM chat_messages m JOIN users u ON u.id = m.user_id WHERE m.id = ?`).get(message.id));
+    },
+    sendChatMessage(message) {
+      return db.transaction(() => {
+        const user = getUserById.get(message.userId);
+        if (!user) return { kind: 'missing' };
+        const mutedUntil = this.getChatMutedUntil(user.id);
+        if (mutedUntil) return { kind: 'muted', until: mutedUntil };
+        const until = user.role === 'admin' ? null : this.getChatCooldown(user.id);
+        if (until) return { kind: 'cooldown', until };
+        return { kind: 'accepted', message: this.createChatMessage(message) };
+      }).immediate();
     },
     reactChatMessage(id, userId, reaction) {
       const message = db.prepare("SELECT * FROM chat_messages WHERE id = ? AND status = 'published'").get(id);

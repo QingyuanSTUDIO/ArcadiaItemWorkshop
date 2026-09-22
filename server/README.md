@@ -73,6 +73,22 @@ pm2 stop arcadia-item-workshop
 - `POST /api/items`
 - `POST /api/items/:id/report`，请求体：`{"reason":"举报理由"}`
 
+## 聊天与管理
+
+- 后台首页新增「聊天管理」入口，独立页面为 `/admin/chat`。
+- 留言管理支持搜索、分页、公开/隐藏筛选、隐藏、恢复和永久删除。
+- 「禁言与用户」视图支持查看活跃状态、禁言原因和到期时间，以及已有账号/IP 封禁状态。
+- 管理员可以在后台或酒馆脚本的消息按钮中禁言普通用户，支持限时/永久禁言及后台解禁。禁言仅限制聊天发言，不等同于账号封禁。
+- 普通用户发言冷却 10 秒，服务端事务检查并持久化；管理员免冷却。删除留言或重启服务不会重置冷却。
+- 登录、手动刷新、打开聊天、发送和互动更新活跃时间；后台聊天轮询不刷新活跃时间。20 分钟内显示绿点，超时显示红点。
+- 公共接口最多返回最近 200 条可见留言；前端内存和 DOM 同样最多保留 200 条，不在本地存储留言。服务器保留历史记录供管理员分页审查，不自动删除。
+- `/api/chat/activity`（POST）记录主动活动；`/api/chat/messages`（GET/POST）读取/发送留言。
+- `/api/admin/chat/messages`（GET）分页查询；`/api/admin/chat/messages/:id`（POST/DELETE）更改状态/删除。
+- `/api/admin/chat/users/:id/mute`（POST）接受 `action: mute/unmute`、`duration: 30m/12h/7d/permanent` 和可选 `reason`。
+- 首次重启自动追加数据库字段，不需要手工建表。可通过 `DATABASE_PATH` 指定隔离测试数据库路径。
+- 数据库和 HTTP 测试：安装依赖后执行 `npm test`；推荐使用 Node.js 22，原生 SQLite 模块必须与运行时版本匹配。
+- 可选浏览器回归测试：准备 Playwright 和 Chromium 后执行 `npm run test:ui`。可用 `PLAYWRIGHT_MODULE` 指定已有 Playwright 模块路径，用 `PLAYWRIGHT_CHANNEL=msedge` 使用已安装的 Edge。测试使用模拟接口，不访问线上服务，截图保存在系统临时目录下的 `arcadia-chat-ui`，可通过 `CHAT_SCREENSHOT_DIR` 覆盖。
+
 标准上传样例位于 `test/example-item.json`。服务启动后可以测试：
 
 ```bash

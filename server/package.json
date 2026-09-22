@@ -5,8 +5,9 @@
   "type": "module",
   "scripts": {
     "start": "node src/server.js",
-    "check": "node --check src/server.js && node --check src/validation.js",
-    "test": "node --test"
+    "check": "node --check src/server.js && node --check src/database.js && node --check src/validation.js",
+    "test": "node --test",
+    "test:ui": "node scripts/chat-ui-check.cjs"
   },
   "engines": { "node": ">=20" },
   "dependencies": { "better-sqlite3": "^11.8.1" }
